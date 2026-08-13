@@ -1,0 +1,33 @@
+bin/
+obj/
+.vs/
+.vscode/
+TestResults/
+coverage/
+*.user
+*.suo
+*.rsuser
+*.nupkg
+*.snupkg
+
+# Secrets and local-only configuration
+secrets.json
+*.secret.json
+*.secrets.json
+appsettings.Local.json
+appsettings.Production.json
+*.pfx
+*.pem
+*.key
+*.crt
+.env
+.env.*
+
+# Build and publish output
+artifacts/
+publish/
+*.log
+
+# OS/editor noise
+Thumbs.db
+Desktop.ini
