@@ -1,0 +1,61 @@
+using BloodLink.Application.Contracts;
+using BloodLink.Infrastructure.Data;
+using BloodLink.Infrastructure.Identity;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace BloodLink.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddBloodLinkInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("BloodLinkDatabase")
+            ?? "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;MultipleActiveResultSets=true";
+
+        services.AddDbContext<BloodLinkDbContext>(options =>
+            options.UseSqlServer(connectionString));
+
+        services.AddIdentityCore<ApplicationUser>(options =>
+            {
+                options.SignIn.RequireConfirmedAccount = false;
+                options.Password.RequiredLength = 8;
+                options.Password.RequireNonAlphanumeric = false;
+            })
+            .AddRoles<IdentityRole>()
+            .AddEntityFrameworkStores<BloodLinkDbContext>()
+            .AddSignInManager()
+            .AddDefaultTokenProviders();
+
+        services.AddAuthentication(IdentityConstants.ApplicationScheme)
+            .AddIdentityCookies();
+
+        services.AddAuthorization(ConfigureAuthorization);
+
+        return services;
+    }
+
+    private static void ConfigureAuthorization(AuthorizationOptions options)
+    {
+        options.AddPolicy(AuthorizationPolicies.RequireSystemAdmin, policy =>
+            policy.RequireRole(RoleNames.SystemAdmin));
+
+        options.AddPolicy(AuthorizationPolicies.RequireFacilityAdmin, policy =>
+            policy.RequireRole(RoleNames.FacilityAdmin));
+
+        options.AddPolicy(AuthorizationPolicies.RequireFacilityStaff, policy =>
+            policy.RequireRole(RoleNames.FacilityStaff));
+
+        options.AddPolicy(AuthorizationPolicies.RequireApprovedFacilityUser, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.RequireRole(RoleNames.FacilityAdmin, RoleNames.FacilityStaff);
+            // TODO: Security owner must verify IsActive, FacilityId, and approved facility status in a handler.
+        });
+    }
+}
