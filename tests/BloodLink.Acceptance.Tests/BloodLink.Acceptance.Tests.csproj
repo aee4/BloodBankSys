@@ -16,11 +16,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\BloodLink.Infrastructure\BloodLink.Infrastructure.csproj" />
+    <Using Include="Xunit" />
   </ItemGroup>
 
   <ItemGroup>
-    <Using Include="Xunit" />
+    <ProjectReference Include="..\..\src\BloodLink.Domain\BloodLink.Domain.csproj" />
+    <ProjectReference Include="..\..\src\BloodLink.Application\BloodLink.Application.csproj" />
+    <ProjectReference Include="..\..\src\BloodLink.Infrastructure\BloodLink.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
