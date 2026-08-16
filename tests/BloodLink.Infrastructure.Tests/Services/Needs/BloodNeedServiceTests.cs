@@ -81,6 +81,27 @@ public sealed class BloodNeedServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_AcceptsFutureNeededByUtc()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var service = new BloodNeedService(dbContext, StaffUser("staff-a", WorkflowTestSupport.FacilityAId));
+
+        var result = await service.CreateAsync(new CreateBloodNeedRequest(BloodType.APositive, 1, UrgencyLevel.Routine, DateTime.UtcNow.AddMinutes(5), null));
+
+        Assert.Equal(BloodNeedStatus.PendingReview, result.Status);
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsPastNeededByUtc()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var service = new BloodNeedService(dbContext, StaffUser("staff-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.CreateAsync(new CreateBloodNeedRequest(BloodType.APositive, 1, UrgencyLevel.Routine, DateTime.UtcNow.AddMinutes(-5), null)));
+    }
+
+    [Fact]
     public async Task GetMineAsync_ReturnsOnlyCallerNeeds()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
@@ -108,6 +129,17 @@ public sealed class BloodNeedServiceTests
 
         var need = Assert.Single(needs);
         Assert.Equal(WorkflowTestSupport.FacilityAId, need.FacilityId);
+    }
+
+    [Fact]
+    public async Task FacilityAdminActions_CannotTargetAnotherFacilityNeed()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityBId, "staff-b");
+        var service = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.StartSearchAsync(new NeedDecisionRequest(need.Id, null)));
     }
 
     [Fact]
@@ -168,6 +200,51 @@ public sealed class BloodNeedServiceTests
         await service.CancelAsync(new NeedDecisionRequest(need.Id, "No longer needed"));
 
         Assert.Equal(BloodNeedStatus.Cancelled, dbContext.BloodNeeds.Single().Status);
+    }
+
+    [Fact]
+    public async Task CancelAsync_RequiresReason()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a");
+        var service = new BloodNeedService(dbContext, StaffUser("staff-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.CancelAsync(new NeedDecisionRequest(need.Id, " ")));
+
+        Assert.Equal(BloodNeedStatus.PendingReview, dbContext.BloodNeeds.Single().Status);
+    }
+
+    [Theory]
+    [InlineData(BloodRequestStatus.Sent)]
+    [InlineData(BloodRequestStatus.Accepted)]
+    public async Task CancelAsync_SearchingNeedWithActiveRequestIsBlocked(BloodRequestStatus activeStatus)
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, activeStatus);
+        var service = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.CancelAsync(new NeedDecisionRequest(need.Id, "No longer needed")));
+
+        Assert.Equal(BloodNeedStatus.Searching, dbContext.BloodNeeds.Single().Status);
+    }
+
+    [Theory]
+    [InlineData(BloodRequestStatus.Sent)]
+    [InlineData(BloodRequestStatus.Accepted)]
+    public async Task FulfilInternallyAsync_SearchingNeedWithActiveRequestIsBlocked(BloodRequestStatus activeStatus)
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, activeStatus);
+        var service = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.FulfilInternallyAsync(new NeedDecisionRequest(need.Id, "Covered locally")));
+
+        Assert.Equal(BloodNeedStatus.Searching, dbContext.BloodNeeds.Single().Status);
     }
 
     [Fact]

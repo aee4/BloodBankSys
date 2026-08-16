@@ -21,6 +21,12 @@ public sealed class BloodRequestService(
         BloodRequestStatus.Cancelled
     ];
 
+    private static readonly BloodRequestStatus[] ActiveRequestStatuses =
+    [
+        BloodRequestStatus.Sent,
+        BloodRequestStatus.Accepted
+    ];
+
     public async Task<BloodRequestDto> CreateFromNeedAsync(CreateBloodRequestRequest request, CancellationToken cancellationToken = default)
     {
         var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
@@ -56,7 +62,7 @@ public sealed class BloodRequestService(
         }
 
         var activeRequestExists = await dbContext.BloodRequests.AnyAsync(
-            item => item.BloodNeedId == need.Id && !FinalRequestStatuses.Contains(item.Status),
+            item => item.BloodNeedId == need.Id && ActiveRequestStatuses.Contains(item.Status),
             cancellationToken);
 
         if (activeRequestExists)
@@ -262,6 +268,11 @@ public sealed class BloodRequestService(
             .SingleOrDefaultAsync(item => item.Id == bloodRequest.BloodNeedId, cancellationToken)
             ?? throw new InvalidOperationException("The linked blood need was not found.");
 
+        if (need.Status != BloodNeedStatus.Searching)
+        {
+            throw new InvalidOperationException("The linked blood need must still be searching before this request can be fulfilled.");
+        }
+
         await inventoryService.FulfilTransferAsync(bloodRequest.Id, cancellationToken);
 
         var nowUtc = DateTime.UtcNow;
@@ -302,20 +313,14 @@ public sealed class BloodRequestService(
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
-        await WorkflowNotifications.AddForActiveFacilityAdminsAsync(
+        var recipientIds = await WorkflowNotifications.GetActiveFacilityAdminIdsAsync(
             dbContext,
             bloodRequest.RequestingFacilityId,
-            notificationType,
-            title,
-            message,
-            nameof(BloodRequest),
-            bloodRequest.Id,
-            nowUtc,
             cancellationToken);
 
         WorkflowNotifications.AddForUsers(
             dbContext,
-            [bloodRequest.RequestedByAdminId],
+            recipientIds.Append(bloodRequest.RequestedByAdminId),
             notificationType,
             title,
             message,

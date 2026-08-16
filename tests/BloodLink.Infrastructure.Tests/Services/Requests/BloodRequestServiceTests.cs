@@ -118,7 +118,7 @@ public sealed class BloodRequestServiceTests
         Assert.Equal(3, stored.UnitsAccepted);
         Assert.Equal(1, inventory.ReserveCalls);
         Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.ToStatus == BloodRequestStatus.Accepted));
-        Assert.Contains(dbContext.Notifications, notification => notification.NotificationType == NotificationType.RequestResponse);
+        Assert.Single(dbContext.Notifications.Where(notification => notification.NotificationType == NotificationType.RequestResponse));
     }
 
     [Fact]
@@ -151,6 +151,31 @@ public sealed class BloodRequestServiceTests
     }
 
     [Fact]
+    public async Task AcceptAsync_RequestingAdminReceivesOneNotificationWhenAlsoActiveFacilityAdmin()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-other", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var bloodRequest = WorkflowTestSupport.AddRequest(
+            dbContext,
+            need.Id,
+            WorkflowTestSupport.FacilityAId,
+            WorkflowTestSupport.FacilityBId,
+            requestedByAdminId: "admin-a");
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId));
+
+        await service.AcceptAsync(new RequestResponseRequest(bloodRequest.Id, 1, null));
+
+        var responseNotifications = dbContext.Notifications
+            .Where(notification => notification.NotificationType == NotificationType.RequestResponse)
+            .ToList();
+        Assert.Equal(2, responseNotifications.Count);
+        Assert.Single(responseNotifications, notification => notification.RecipientUserId == "admin-a");
+        Assert.Single(responseNotifications, notification => notification.RecipientUserId == "admin-other");
+    }
+
+    [Fact]
     public async Task RejectAsync_RequiresReasonAndLeavesNeedSearching()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
@@ -163,6 +188,19 @@ public sealed class BloodRequestServiceTests
 
         Assert.Equal(BloodRequestStatus.Rejected, dbContext.BloodRequests.Single().Status);
         Assert.Equal(BloodNeedStatus.Searching, dbContext.BloodNeeds.Single().Status);
+        Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.FromStatus == BloodRequestStatus.Sent && history.ToStatus == BloodRequestStatus.Rejected));
+    }
+
+    [Fact]
+    public async Task RejectAsync_WrongSourceFacilityCannotReject()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var bloodRequest = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId);
+        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.RejectAsync(new RequestResponseRequest(bloodRequest.Id, null, "Unavailable")));
     }
 
     [Fact]
@@ -180,6 +218,23 @@ public sealed class BloodRequestServiceTests
 
         Assert.Equal(1, inventory.ReleaseCalls);
         Assert.All(dbContext.BloodRequests, request => Assert.Equal(BloodRequestStatus.Cancelled, request.Status));
+        Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.BloodRequestId == sent.Id && history.FromStatus == BloodRequestStatus.Sent && history.ToStatus == BloodRequestStatus.Cancelled));
+        Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.BloodRequestId == accepted.Id && history.FromStatus == BloodRequestStatus.Accepted && history.ToStatus == BloodRequestStatus.Cancelled));
+    }
+
+    [Fact]
+    public async Task CancelAsync_ReleaseFailureLeavesAcceptedRequestAccepted()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var accepted = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
+        var inventory = new FakeInventoryService { FailRelease = true };
+        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), inventory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(accepted.Id));
+
+        Assert.Equal(BloodRequestStatus.Accepted, dbContext.BloodRequests.Single().Status);
+        Assert.Empty(dbContext.BloodRequestStatusHistory);
     }
 
     [Fact]
@@ -198,7 +253,7 @@ public sealed class BloodRequestServiceTests
         Assert.Equal(BloodRequestStatus.Fulfilled, dbContext.BloodRequests.Single().Status);
         Assert.Equal(BloodNeedStatus.FulfilledExternally, dbContext.BloodNeeds.Single().Status);
         Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.ToStatus == BloodRequestStatus.Fulfilled));
-        Assert.Contains(dbContext.Notifications, notification => notification.NotificationType == NotificationType.RequestFulfilled);
+        Assert.Single(dbContext.Notifications.Where(notification => notification.NotificationType == NotificationType.RequestFulfilled));
     }
 
     [Fact]
@@ -212,6 +267,80 @@ public sealed class BloodRequestServiceTests
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.FulfilAsync(new FulfilRequestRequest(fulfilled.Id, null)));
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.FulfilAsync(new FulfilRequestRequest(sent.Id, null)));
+    }
+
+    [Theory]
+    [InlineData(BloodNeedStatus.Cancelled)]
+    [InlineData(BloodNeedStatus.Rejected)]
+    [InlineData(BloodNeedStatus.FulfilledInternally)]
+    [InlineData(BloodNeedStatus.FulfilledExternally)]
+    public async Task FulfilAsync_RejectsIncompatibleLinkedNeedState(BloodNeedStatus needStatus)
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", needStatus);
+        var bloodRequest = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
+        var inventory = new FakeInventoryService();
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId), inventory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.FulfilAsync(new FulfilRequestRequest(bloodRequest.Id, null)));
+
+        Assert.Equal(0, inventory.FulfilCalls);
+        Assert.Equal(BloodRequestStatus.Accepted, dbContext.BloodRequests.Single().Status);
+        Assert.Equal(needStatus, dbContext.BloodNeeds.Single().Status);
+    }
+
+    [Fact]
+    public async Task FulfilAsync_TransferFailureLeavesRequestAndNeedUnchanged()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var bloodRequest = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
+        var inventory = new FakeInventoryService { FailFulfil = true };
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId), inventory);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.FulfilAsync(new FulfilRequestRequest(bloodRequest.Id, null)));
+
+        Assert.Equal(BloodRequestStatus.Accepted, dbContext.BloodRequests.Single().Status);
+        Assert.Equal(BloodNeedStatus.Searching, dbContext.BloodNeeds.Single().Status);
+        Assert.Empty(dbContext.BloodRequestStatusHistory);
+    }
+
+    [Fact]
+    public async Task FulfilAsync_WrongSourceFacilityCannotFulfil()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var bloodRequest = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
+        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.FulfilAsync(new FulfilRequestRequest(bloodRequest.Id, null)));
+    }
+
+    [Theory]
+    [InlineData(BloodRequestStatus.Rejected)]
+    [InlineData(BloodRequestStatus.Fulfilled)]
+    [InlineData(BloodRequestStatus.Cancelled)]
+    public async Task FinalRequestStatusesRejectFurtherTransitions(BloodRequestStatus finalStatus)
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var bloodRequest = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, finalStatus);
+        var sourceService = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId));
+        var requesterService = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sourceService.AcceptAsync(new RequestResponseRequest(bloodRequest.Id, 1, null)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sourceService.RejectAsync(new RequestResponseRequest(bloodRequest.Id, null, "Unavailable")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            requesterService.CancelAsync(bloodRequest.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sourceService.FulfilAsync(new FulfilRequestRequest(bloodRequest.Id, null)));
+
+        Assert.Equal(finalStatus, dbContext.BloodRequests.Single().Status);
     }
 
     private static BloodRequestService CreateService(

@@ -19,6 +19,16 @@ internal static class WorkflowNotifications
         DateTime nowUtc,
         CancellationToken cancellationToken)
     {
+        var recipientIds = await GetActiveFacilityAdminIdsAsync(dbContext, facilityId, cancellationToken);
+
+        AddForUsers(dbContext, recipientIds, notificationType, title, message, relatedEntityType, relatedEntityId, nowUtc);
+    }
+
+    public static async Task<IReadOnlyList<string>> GetActiveFacilityAdminIdsAsync(
+        BloodLinkDbContext dbContext,
+        Guid facilityId,
+        CancellationToken cancellationToken)
+    {
         var adminRoleId = await dbContext.Roles
             .Where(role => role.Name == RoleNames.FacilityAdmin)
             .Select(role => role.Id)
@@ -26,10 +36,10 @@ internal static class WorkflowNotifications
 
         if (string.IsNullOrWhiteSpace(adminRoleId))
         {
-            return;
+            return [];
         }
 
-        var recipientIds = await (
+        return await (
                 from user in dbContext.Users
                 join userRole in dbContext.UserRoles on user.Id equals userRole.UserId
                 where user.FacilityId == facilityId
@@ -38,8 +48,6 @@ internal static class WorkflowNotifications
                 select user.Id)
             .Distinct()
             .ToListAsync(cancellationToken);
-
-        AddForUsers(dbContext, recipientIds, notificationType, title, message, relatedEntityType, relatedEntityId, nowUtc);
     }
 
     public static void AddForUsers(

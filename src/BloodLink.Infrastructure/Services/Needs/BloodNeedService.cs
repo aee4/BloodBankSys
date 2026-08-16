@@ -21,6 +21,12 @@ public sealed class BloodNeedService(
         BloodNeedStatus.Cancelled
     ];
 
+    private static readonly BloodRequestStatus[] ActiveRequestStatuses =
+    [
+        BloodRequestStatus.Sent,
+        BloodRequestStatus.Accepted
+    ];
+
     public async Task<BloodNeedDto> CreateAsync(CreateBloodNeedRequest request, CancellationToken cancellationToken = default)
     {
         var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
@@ -33,9 +39,13 @@ public sealed class BloodNeedService(
         WorkflowValidation.EnsureSafeNote(request.Note);
 
         var nowUtc = DateTime.UtcNow;
-        if (request.NeededByUtc.Kind == DateTimeKind.Local || request.NeededByUtc <= nowUtc.AddMinutes(-1))
+        var neededByUtc = request.NeededByUtc.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(request.NeededByUtc, DateTimeKind.Utc)
+            : request.NeededByUtc.ToUniversalTime();
+
+        if (neededByUtc <= nowUtc)
         {
-            throw new ArgumentException("Needed-by time must be a sensible UTC time in the future.");
+            throw new ArgumentException("Needed-by time must be in the future.");
         }
 
         var need = new BloodNeed
@@ -46,9 +56,7 @@ public sealed class BloodNeedService(
             BloodType = request.BloodType,
             UnitsNeeded = request.UnitsNeeded,
             Urgency = request.Urgency,
-            NeededByUtc = request.NeededByUtc.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(request.NeededByUtc, DateTimeKind.Utc)
-                : request.NeededByUtc.ToUniversalTime(),
+            NeededByUtc = neededByUtc,
             Note = TrimToNull(request.Note),
             Status = BloodNeedStatus.PendingReview,
             CreatedAtUtc = nowUtc,
@@ -112,6 +120,7 @@ public sealed class BloodNeedService(
             throw new InvalidOperationException("Only pending or searching needs may be fulfilled internally.");
         }
 
+        await EnsureNoActiveExternalRequestAsync(need, cancellationToken);
         ApplyNeedTransition(need, BloodNeedStatus.FulfilledInternally, request.Reason);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -144,7 +153,14 @@ public sealed class BloodNeedService(
             throw new InvalidOperationException("This blood need cannot be cancelled from its current status.");
         }
 
+        if (string.IsNullOrWhiteSpace(request.Reason))
+        {
+            throw new ArgumentException("A cancellation reason is required.");
+        }
+
+        WorkflowValidation.EnsureSafeNote(request.Reason);
         await ServiceGuards.RequireApprovedFacilityAsync(dbContext, need.FacilityId, cancellationToken);
+        await EnsureNoActiveExternalRequestAsync(need, cancellationToken);
         ApplyNeedTransition(need, BloodNeedStatus.Cancelled, request.Reason);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -202,6 +218,23 @@ public sealed class BloodNeedService(
         if (FinalStatuses.Contains(need.Status))
         {
             throw new InvalidOperationException("Final blood needs cannot transition again.");
+        }
+    }
+
+    private async Task EnsureNoActiveExternalRequestAsync(BloodNeed need, CancellationToken cancellationToken)
+    {
+        if (need.Status != BloodNeedStatus.Searching)
+        {
+            return;
+        }
+
+        var hasActiveRequest = await dbContext.BloodRequests.AnyAsync(
+            request => request.BloodNeedId == need.Id && ActiveRequestStatuses.Contains(request.Status),
+            cancellationToken);
+
+        if (hasActiveRequest)
+        {
+            throw new InvalidOperationException("Resolve or cancel the active external blood request before changing this searching blood need.");
         }
     }
 
