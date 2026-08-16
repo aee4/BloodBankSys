@@ -1,6 +1,11 @@
 using BloodLink.Application.Contracts;
+using BloodLink.Application.Interfaces;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
+using BloodLink.Infrastructure.Services.Dashboard;
+using BloodLink.Infrastructure.Services.Needs;
+using BloodLink.Infrastructure.Services.Notifications;
+using BloodLink.Infrastructure.Services.Requests;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +41,10 @@ public static class DependencyInjection
             .AddIdentityCookies();
 
         services.AddAuthorization(ConfigureAuthorization);
+        services.AddScoped<IBloodNeedService, BloodNeedService>();
+        services.AddScoped<IBloodRequestService, BloodRequestService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IDashboardService, DashboardService>();
 
         return services;
     }
