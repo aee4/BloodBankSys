@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -9,7 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BloodLink.Domain", "src\Blo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BloodLink.Application", "src\BloodLink.Application\BloodLink.Application.csproj", "{F38C2596-E2DD-4F43-99CD-020DF9868BD0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BloodLink.Infrastructure", "BloodLink.Infrastructure\BloodLink.Infrastructure.csproj", "{13F792E5-9758-44C7-AAA8-F09CCAF8355D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BloodLink.Infrastructure", "src\BloodLink.Infrastructure\BloodLink.Infrastructure.csproj", "{13F792E5-9758-44C7-AAA8-F09CCAF8355D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BloodLink.Web", "src\BloodLink.Web\BloodLink.Web.csproj", "{E5D2DE6E-0C75-497D-96EE-F3D30FE4078F}"
 EndProject
