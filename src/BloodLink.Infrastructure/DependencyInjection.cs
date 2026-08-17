@@ -1,6 +1,14 @@
 using BloodLink.Application.Contracts;
+using BloodLink.Application.Interfaces;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
+using BloodLink.Infrastructure.Services.DashboardServices;
+using BloodLink.Infrastructure.Services.FacilityServices;
+using BloodLink.Infrastructure.Services.Inventory;
+using BloodLink.Infrastructure.Services.NeedServices;
+using BloodLink.Infrastructure.Services.NotificationServices;
+using BloodLink.Infrastructure.Services.RequestServices;
+using BloodLink.Infrastructure.Services.StaffServices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +44,26 @@ public static class DependencyInjection
             .AddIdentityCookies();
 
         services.AddAuthorization(ConfigureAuthorization);
+
+        // Add HTTP context accessor for CurrentUserService
+        services.AddHttpContextAccessor();
+
+        // Register application services
+        // Security: Current User
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
+
+        // Backend Developer 1: Facilities & Staff
+        services.AddScoped<IFacilityService, FacilityService>();
+        services.AddScoped<IStaffService, StaffService>();
+
+        // Backend Developer 2: Inventory
+        services.AddScoped<IInventoryService, InventoryService>();
+
+        // Backend Developer 3: Needs, Requests, Notifications, Dashboards
+        services.AddScoped<IBloodNeedService, BloodNeedService>();
+        services.AddScoped<IBloodRequestService, BloodRequestService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IDashboardService, DashboardService>();
 
         return services;
     }
