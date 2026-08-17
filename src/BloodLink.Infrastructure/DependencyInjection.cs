@@ -23,7 +23,7 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("BloodLinkDatabase")
             ?? "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;MultipleActiveResultSets=true";
 
-        services.AddDbContext<BloodLinkDbContext>(options =>
+        services.AddDbContextFactory<BloodLinkDbContext>(options =>
             options.UseSqlServer(connectionString));
 
         services.AddIdentityCore<ApplicationUser>(options =>
@@ -41,6 +41,8 @@ public static class DependencyInjection
             .AddIdentityCookies();
 
         services.AddAuthorization(ConfigureAuthorization);
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IBloodNeedService, BloodNeedService>();
         services.AddScoped<IBloodRequestService, BloodRequestService>();
         services.AddScoped<INotificationService, NotificationService>();
