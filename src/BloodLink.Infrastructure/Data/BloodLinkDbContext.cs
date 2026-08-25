@@ -21,27 +21,6 @@ public sealed class BloodLinkDbContext(DbContextOptions<BloodLinkDbContext> opti
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-
-        builder.Entity<Facility>()
-            .HasIndex(facility => new { facility.Name, facility.RegistrationNumber })
-            .IsUnique();
-
-        builder.Entity<BloodInventory>()
-            .HasIndex(inventory => new { inventory.FacilityId, inventory.BloodType })
-            .IsUnique();
-
-        builder.Entity<BloodInventory>()
-            .Property(inventory => inventory.RowVersion)
-            .IsRowVersion();
-
-        builder.Entity<BloodNeed>()
-            .Property(need => need.RowVersion)
-            .IsRowVersion();
-
-        builder.Entity<BloodRequest>()
-            .Property(request => request.RowVersion)
-            .IsRowVersion();
-
-        // TODO: Database Developer 1 owns complete relationship, length, enum, and delete behavior configuration.
+        builder.ApplyConfigurationsFromAssembly(typeof(BloodLinkDbContext).Assembly);
     }
 }

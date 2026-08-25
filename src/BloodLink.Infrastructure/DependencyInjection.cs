@@ -3,9 +3,11 @@ using BloodLink.Application.Interfaces;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
 using BloodLink.Infrastructure.Services.Dashboard;
+using BloodLink.Infrastructure.Services.Inventory;
 using BloodLink.Infrastructure.Services.Needs;
 using BloodLink.Infrastructure.Services.Notifications;
 using BloodLink.Infrastructure.Services.Requests;
+using BloodLink.Infrastructure.Services.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -40,7 +42,10 @@ public static class DependencyInjection
         services.AddAuthentication(IdentityConstants.ApplicationScheme)
             .AddIdentityCookies();
 
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddAuthorization(ConfigureAuthorization);
+        services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<IBloodNeedService, BloodNeedService>();
         services.AddScoped<IBloodRequestService, BloodRequestService>();
         services.AddScoped<INotificationService, NotificationService>();

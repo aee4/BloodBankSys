@@ -1,5 +1,6 @@
-using BloodLink.Web.Components;
 using BloodLink.Infrastructure;
+using BloodLink.Infrastructure.Data.Seed;
+using BloodLink.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,6 +10,11 @@ builder.Services.AddRazorComponents()
 builder.Services.AddBloodLinkInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    await DatabaseSeeder.SeedAsync(scope.ServiceProvider);
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

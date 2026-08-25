@@ -1,0 +1,152 @@
+erDiagram
+    FACILITY ||--o{ FACILITY_STAFF : assigns
+    FACILITY ||--o{ BLOOD_INVENTORY : holds
+    FACILITY ||--o{ BLOOD_NEED : records
+    FACILITY ||--o{ BLOOD_REQUEST : requests
+    FACILITY ||--o{ BLOOD_REQUEST : sources
+    BLOOD_NEED ||--o{ BLOOD_REQUEST : generates
+    BLOOD_INVENTORY ||--o{ INVENTORY_TRANSACTION : logs
+    BLOOD_REQUEST ||--o{ BLOOD_REQUEST_STATUS_HISTORY : tracks
+    APPLICATION_USER ||--o{ FACILITY_STAFF : staff_member
+    APPLICATION_USER ||--o{ BLOOD_NEED : requests
+    APPLICATION_USER ||--o{ BLOOD_REQUEST : requested_by
+    APPLICATION_USER ||--o{ BLOOD_REQUEST : responded_by
+    APPLICATION_USER ||--o{ BLOOD_REQUEST : fulfilled_by
+    APPLICATION_USER ||--o{ NOTIFICATION : receives
+    APPLICATION_USER ||--o{ AUDIT_LOG : creates
+
+    FACILITY {
+        uniqueidentifier Id PK
+        string Name
+        int FacilityType
+        string RegistrationNumber
+        string Region
+        string City
+        string Address
+        string ContactEmail
+        string ContactPhone
+        int Status
+        string RejectionReason
+        string CreatedByUserId
+        string ApprovedByUserId
+        datetime CreatedAtUtc
+        datetime ApprovedAtUtc
+    }
+
+    FACILITY_STAFF {
+        uniqueidentifier Id PK
+        uniqueidentifier FacilityId FK
+        string UserId FK
+        int Status
+        string CreatedByAdminId
+        datetime CreatedAtUtc
+        datetime DeactivatedAtUtc
+        string StatusReason
+    }
+
+    BLOOD_INVENTORY {
+        uniqueidentifier Id PK
+        uniqueidentifier FacilityId FK
+        int BloodType
+        int TotalUnits
+        int ReservedUnits
+        int LowStockThreshold
+        datetime UpdatedAtUtc
+        rowversion RowVersion
+    }
+
+    INVENTORY_TRANSACTION {
+        uniqueidentifier Id PK
+        uniqueidentifier BloodInventoryId FK
+        int TransactionType
+        int TotalUnitsChange
+        int ReservedUnitsChange
+        int TotalAfter
+        int ReservedAfter
+        string Reason
+        string ReferenceType
+        uniqueidentifier ReferenceId
+        string PerformedByUserId
+        datetime CreatedAtUtc
+    }
+
+    BLOOD_NEED {
+        uniqueidentifier Id PK
+        uniqueidentifier FacilityId FK
+        string RequestedByUserId FK
+        int BloodType
+        int UnitsNeeded
+        int Urgency
+        datetime NeededByUtc
+        string Note
+        int Status
+        string DecisionReason
+        datetime CreatedAtUtc
+        datetime UpdatedAtUtc
+        rowversion RowVersion
+    }
+
+    BLOOD_REQUEST {
+        uniqueidentifier Id PK
+        uniqueidentifier BloodNeedId FK
+        uniqueidentifier RequestingFacilityId FK
+        uniqueidentifier SourceFacilityId FK
+        int BloodType
+        int UnitsRequested
+        int UnitsAccepted
+        int Status
+        string RequestNote
+        string ResponseNote
+        string RequestedByAdminId FK
+        string RespondedByAdminId FK
+        string FulfilledByAdminId FK
+        datetime CreatedAtUtc
+        datetime RespondedAtUtc
+        datetime FulfilledAtUtc
+        rowversion RowVersion
+    }
+
+    BLOOD_REQUEST_STATUS_HISTORY {
+        uniqueidentifier Id PK
+        uniqueidentifier BloodRequestId FK
+        int FromStatus
+        int ToStatus
+        string Note
+        string ChangedByUserId FK
+        datetime ChangedAtUtc
+    }
+
+    NOTIFICATION {
+        uniqueidentifier Id PK
+        string RecipientUserId FK
+        int NotificationType
+        string Title
+        string Message
+        string RelatedEntityType
+        uniqueidentifier RelatedEntityId
+        bool IsRead
+        datetime CreatedAtUtc
+        datetime ReadAtUtc
+    }
+
+    AUDIT_LOG {
+        uniqueidentifier Id PK
+        string ActorUserId FK
+        string Action
+        string EntityType
+        uniqueidentifier EntityId
+        uniqueidentifier FacilityId
+        string Summary
+        string IpAddress
+        datetime CreatedAtUtc
+    }
+
+    APPLICATION_USER {
+        string Id PK
+        string UserName
+        string Email
+        string FirstName
+        string LastName
+        uniqueidentifier FacilityId
+        bool IsActive
+    }
