@@ -35,7 +35,7 @@ public sealed class FacilityService(
             throw new InvalidOperationException("A facility with the same name or registration number already exists.");
         }
 
-        if (await dbContext.Users.AnyAsync(user => user.NormalizedEmail == normalizedAdminEmail, cancellationToken))
+        if (await UserEmailExistsAsync(adminEmail, normalizedAdminEmail, cancellationToken))
         {
             throw new InvalidOperationException("A user with the same email already exists.");
         }
@@ -256,6 +256,14 @@ public sealed class FacilityService(
             ? throw new InvalidOperationException($"{roleName} role is not configured.")
             : roleId;
     }
+
+    private async Task<bool> UserEmailExistsAsync(
+        string email,
+        string normalizedEmail,
+        CancellationToken cancellationToken) =>
+        await dbContext.Users.AnyAsync(
+            user => user.NormalizedEmail == normalizedEmail || user.Email == email,
+            cancellationToken);
 
     private void AddAudit(
         string action,

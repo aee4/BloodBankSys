@@ -48,7 +48,7 @@ public sealed class StaffService(
         var email = request.Email.Trim();
         var normalizedEmail = Normalize(email);
 
-        if (await dbContext.Users.AnyAsync(user => user.NormalizedEmail == normalizedEmail, cancellationToken))
+        if (await UserEmailExistsAsync(email, normalizedEmail, cancellationToken))
         {
             throw new InvalidOperationException("A user with the same email already exists.");
         }
@@ -197,6 +197,14 @@ public sealed class StaffService(
             ? throw new InvalidOperationException($"{roleName} role is not configured.")
             : roleId;
     }
+
+    private async Task<bool> UserEmailExistsAsync(
+        string email,
+        string normalizedEmail,
+        CancellationToken cancellationToken) =>
+        await dbContext.Users.AnyAsync(
+            user => user.NormalizedEmail == normalizedEmail || user.Email == email,
+            cancellationToken);
 
     private void AddAudit(string action, string entityType, Guid entityId, Guid facilityId, string summary, DateTime nowUtc)
     {
