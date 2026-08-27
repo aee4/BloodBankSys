@@ -1,0 +1,14 @@
+<a class="bl-brand @(Dark ? "bl-brand-dark" : null) @(Compact ? "bl-brand-compact" : null)"
+   href="@Href"
+   aria-label="BloodLink home">
+    <span class="bl-brand-mark" aria-hidden="true">
+        <AppIcon Name="droplet" Size="@(Compact ? 13 : 15)" Filled="true" />
+    </span>
+    <span>BloodLink</span>
+</a>
+
+@code {
+    [Parameter] public string Href { get; set; } = "/";
+    [Parameter] public bool Dark { get; set; }
+    [Parameter] public bool Compact { get; set; }
+}

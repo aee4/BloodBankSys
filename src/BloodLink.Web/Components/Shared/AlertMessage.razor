@@ -1,0 +1,16 @@
+<div class="bl-alert bl-alert-@Variant" role="@(Variant == "danger" ? "alert" : "status")">
+    <AppIcon Name="@(Variant == "success" ? "circle-check" : "circle-alert")" Size="16" />
+    <div>
+        @if (!string.IsNullOrWhiteSpace(Title))
+        {
+            <strong>@Title</strong>
+        }
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Variant { get; set; } = "info";
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}
