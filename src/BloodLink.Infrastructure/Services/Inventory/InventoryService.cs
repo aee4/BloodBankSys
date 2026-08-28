@@ -128,35 +128,22 @@ public sealed class InventoryService : IInventoryService
 
         var facilityId = _currentUserService.FacilityId!.Value;
 
-        var transactions = await _context.InventoryTransactions
-            .Include(t => t.BloodInventoryId)
-            .Where(t => _context.BloodInventory
-                .Where(bi => bi.FacilityId == facilityId)
-                .Any(bi => bi.Id == t.BloodInventoryId))
-            .OrderByDescending(t => t.CreatedAtUtc)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        // Map with BloodType from related inventory
-        var transactionDtos = new List<InventoryTransactionDto>();
-        foreach (var transaction in transactions)
-        {
-            var inventory = await _context.BloodInventory
-                .FirstOrDefaultAsync(bi => bi.Id == transaction.BloodInventoryId, cancellationToken);
-
-            if (inventory != null)
-            {
-                transactionDtos.Add(new InventoryTransactionDto(
+        var transactions = await (
+                from transaction in _context.InventoryTransactions.AsNoTracking()
+                join inventory in _context.BloodInventory.AsNoTracking()
+                    on transaction.BloodInventoryId equals inventory.Id
+                where inventory.FacilityId == facilityId
+                orderby transaction.CreatedAtUtc descending
+                select new InventoryTransactionDto(
                     transaction.Id,
                     inventory.BloodType,
                     transaction.TransactionType,
                     transaction.TotalUnitsChange,
                     transaction.ReservedUnitsChange,
-                    transaction.CreatedAtUtc));
-            }
-        }
+                    transaction.CreatedAtUtc))
+            .ToListAsync(cancellationToken);
 
-        return transactionDtos.AsReadOnly();
+        return transactions.AsReadOnly();
     }
 
     public async Task<IReadOnlyList<LowStockAlertDto>> GetLowStockAlertsAsync(LowStockQueryRequest request, CancellationToken cancellationToken = default)
@@ -166,7 +153,7 @@ public sealed class InventoryService : IInventoryService
         var facilityId = _currentUserService.FacilityId!.Value;
 
         var lowStockItems = await _context.BloodInventory
-            .Where(bi => bi.FacilityId == facilityId && bi.AvailableUnits <= bi.LowStockThreshold)
+            .Where(bi => bi.FacilityId == facilityId && bi.TotalUnits - bi.ReservedUnits <= bi.LowStockThreshold)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
@@ -190,38 +177,22 @@ public sealed class InventoryService : IInventoryService
         // Verify requesting facility is approved
         await GetApprovedFacilityAsync(requestingFacilityId, cancellationToken);
 
-        // Search approved active facilities for exact blood type with minimum available units
-        // Exclude the requesting facility and pending/suspended facilities
-        var results = await _context.BloodInventory
-            .Where(bi => 
-                bi.BloodType == request.BloodType &&
-                bi.AvailableUnits >= request.MinimumAvailableUnits &&
-                bi.FacilityId != requestingFacilityId &&
-                _context.Facilities.Any(f => 
-                    f.Id == bi.FacilityId && 
-                    f.Status == FacilityStatus.Approved))
-            .Include(bi => _context.Facilities.FirstOrDefault(f => f.Id == bi.FacilityId))
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        var availabilityResults = new List<AvailabilityResultDto>();
-
-        foreach (var inventory in results)
-        {
-            var facility = await _context.Facilities
-                .FirstOrDefaultAsync(f => f.Id == inventory.FacilityId, cancellationToken);
-
-            if (facility != null && facility.Status == FacilityStatus.Approved)
-            {
-                availabilityResults.Add(new AvailabilityResultDto(
+        var availabilityResults = await (
+                from inventory in _context.BloodInventory.AsNoTracking()
+                join facility in _context.Facilities.AsNoTracking()
+                    on inventory.FacilityId equals facility.Id
+                where inventory.BloodType == request.BloodType
+                    && inventory.TotalUnits - inventory.ReservedUnits >= request.MinimumAvailableUnits
+                    && inventory.FacilityId != requestingFacilityId
+                    && facility.Status == FacilityStatus.Approved
+                select new AvailabilityResultDto(
                     facility.Id,
                     facility.Name,
                     facility.FacilityType,
                     facility.City,
                     inventory.BloodType,
-                    inventory.AvailableUnits));
-            }
-        }
+                    inventory.TotalUnits - inventory.ReservedUnits))
+            .ToListAsync(cancellationToken);
 
         return availabilityResults.AsReadOnly();
     }

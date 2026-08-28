@@ -1,75 +1,77 @@
-using BloodLink.Application.Contracts;
+using System.Security.Claims;
 using BloodLink.Application.Interfaces;
-using BloodLink.Infrastructure.Identity;
+using BloodLink.Infrastructure.Data;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Server;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 namespace BloodLink.Infrastructure.Identity;
 
-/// <summary>
-/// Provides access to the current authenticated user's identity information.
-/// Owned by Authentication & Security Developer.
-/// </summary>
-public sealed class CurrentUserService : ICurrentUserService
+public sealed class CurrentUserService(
+    IHttpContextAccessor httpContextAccessor,
+    AuthenticationStateProvider authenticationStateProvider,
+    IDbContextFactory<BloodLinkDbContext> dbContextFactory) : ICurrentUserService
 {
-    private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly UserManager<ApplicationUser> _userManager;
+    private ClaimsPrincipal? Principal => GetPrincipal();
 
-    public CurrentUserService(IHttpContextAccessor httpContextAccessor, UserManager<ApplicationUser> userManager)
+    public string? UserId => IsAuthenticated
+        ? Principal?.FindFirstValue(ClaimTypes.NameIdentifier)
+        : null;
+
+    public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true;
+
+    public IReadOnlyCollection<string> Roles => IsAuthenticated
+        ? Principal!
+            .FindAll(ClaimTypes.Role)
+            .Select(claim => claim.Value)
+            .Where(role => !string.IsNullOrWhiteSpace(role))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+        : Array.Empty<string>();
+
+    public Guid? FacilityId => GetCurrentUser()?.FacilityId;
+
+    public bool IsActive => GetCurrentUser()?.IsActive == true;
+
+    public bool IsInRole(string roleName) =>
+        IsAuthenticated
+        && !string.IsNullOrWhiteSpace(roleName)
+        && Roles.Contains(roleName, StringComparer.OrdinalIgnoreCase);
+
+    public bool BelongsToFacility(Guid facilityId) =>
+        IsAuthenticated && FacilityId == facilityId;
+
+    private ApplicationUser? GetCurrentUser()
     {
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
-        _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
-    }
+        var userId = UserId;
 
-    public string? UserId => _httpContextAccessor.HttpContext?.User?.FindFirst("sub")?.Value;
-
-    public bool IsAuthenticated => _httpContextAccessor.HttpContext?.User?.Identity?.IsAuthenticated ?? false;
-
-    public IReadOnlyCollection<string> Roles
-    {
-        get
+        if (string.IsNullOrWhiteSpace(userId))
         {
-            var user = _httpContextAccessor.HttpContext?.User;
-            if (user == null) return Array.Empty<string>();
-
-            var roles = new List<string>();
-            if (user.IsInRole(RoleNames.SystemAdmin)) roles.Add(RoleNames.SystemAdmin);
-            if (user.IsInRole(RoleNames.FacilityAdmin)) roles.Add(RoleNames.FacilityAdmin);
-            if (user.IsInRole(RoleNames.FacilityStaff)) roles.Add(RoleNames.FacilityStaff);
-
-            return roles.AsReadOnly();
+            return null;
         }
+
+        using var dbContext = dbContextFactory.CreateDbContext();
+
+        return dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefault(user => user.Id == userId);
     }
 
-    public Guid? FacilityId
+    private ClaimsPrincipal? GetPrincipal()
     {
-        get
+        try
         {
-            var facilityIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("facility_id")?.Value;
-            if (string.IsNullOrEmpty(facilityIdClaim) || !Guid.TryParse(facilityIdClaim, out var facilityId))
-            {
-                return null;
-            }
-            return facilityId;
-        }
-    }
+            var authenticationStateTask = authenticationStateProvider.GetAuthenticationStateAsync();
 
-    public bool IsActive
-    {
-        get
+            return authenticationStateTask.IsCompletedSuccessfully
+                ? authenticationStateTask.Result.User
+                : null;
+        }
+        catch (InvalidOperationException) when (
+            authenticationStateProvider is ServerAuthenticationStateProvider)
         {
-            var isActiveClaim = _httpContextAccessor.HttpContext?.User?.FindFirst("is_active")?.Value;
-            return isActiveClaim == "true";
+            return httpContextAccessor.HttpContext?.User;
         }
-    }
-
-    public bool IsInRole(string roleName)
-    {
-        return _httpContextAccessor.HttpContext?.User?.IsInRole(roleName) ?? false;
-    }
-
-    public bool BelongsToFacility(Guid facilityId)
-    {
-        return FacilityId == facilityId;
     }
 }
