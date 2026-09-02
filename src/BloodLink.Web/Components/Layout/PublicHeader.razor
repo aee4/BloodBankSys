@@ -1,0 +1,42 @@
+@rendermode InteractiveServer
+
+<header class="bl-public-header">
+    <div class="bl-container bl-header-inner">
+        <BloodLinkBrand Href="/" />
+
+        <nav class="bl-desktop-nav" aria-label="Primary navigation">
+            <a href="/#how">How It Works</a>
+            <a href="/#features">Features</a>
+            <a href="/account/login">Facility Login</a>
+        </nav>
+
+        <div class="bl-header-actions">
+            <a class="bl-btn bl-btn-outline bl-header-login" href="/account/login">Log In</a>
+            <a class="bl-btn bl-btn-danger bl-header-register" href="/facility/register">Register Facility</a>
+            <button type="button"
+                    class="bl-menu-toggle"
+                    aria-label="@(_menuOpen ? "Close navigation menu" : "Open navigation menu")"
+                    aria-expanded="@_menuOpen"
+                    aria-controls="public-mobile-menu"
+                    @onclick="ToggleMenu">
+                <AppIcon Name="@(_menuOpen ? "x" : "menu")" Size="21" />
+            </button>
+        </div>
+    </div>
+
+    <nav id="public-mobile-menu"
+         class="bl-mobile-nav @(_menuOpen ? "is-open" : null)"
+         aria-label="Mobile navigation">
+        <a href="/#how" @onclick="CloseMenu">How It Works</a>
+        <a href="/#features" @onclick="CloseMenu">Features</a>
+        <a href="/account/login" @onclick="CloseMenu">Facility Login</a>
+        <a href="/facility/register" @onclick="CloseMenu">Register Facility</a>
+    </nav>
+</header>
+
+@code {
+    private bool _menuOpen;
+
+    private void ToggleMenu() => _menuOpen = !_menuOpen;
+    private void CloseMenu() => _menuOpen = false;
+}
