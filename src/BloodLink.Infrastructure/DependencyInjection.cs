@@ -2,12 +2,13 @@ using BloodLink.Application.Contracts;
 using BloodLink.Application.Interfaces;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
-using BloodLink.Infrastructure.Services.Dashboard;
 using BloodLink.Infrastructure.Services.Inventory;
+using BloodLink.Infrastructure.Services.Dashboard;
+using BloodLink.Infrastructure.Services.Facilities;
 using BloodLink.Infrastructure.Services.Needs;
 using BloodLink.Infrastructure.Services.Notifications;
 using BloodLink.Infrastructure.Services.Requests;
-using BloodLink.Infrastructure.Services.Security;
+using BloodLink.Infrastructure.Services.Staff;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -25,7 +26,7 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("BloodLinkDatabase")
             ?? "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;MultipleActiveResultSets=true";
 
-        services.AddDbContext<BloodLinkDbContext>(options =>
+        services.AddDbContextFactory<BloodLinkDbContext>(options =>
             options.UseSqlServer(connectionString));
 
         services.AddIdentityCore<ApplicationUser>(options =>
@@ -45,11 +46,15 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddAuthorization(ConfigureAuthorization);
-        services.AddScoped<IInventoryService, InventoryService>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddScoped<IFacilityService, FacilityService>();
+        services.AddScoped<IStaffService, StaffService>();
         services.AddScoped<IBloodNeedService, BloodNeedService>();
         services.AddScoped<IBloodRequestService, BloodRequestService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IInventoryService, InventoryService>();
 
         return services;
     }

@@ -8,7 +8,7 @@ using BloodLink.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
-namespace BloodLink.Infrastructure.Tests.Services;
+namespace BloodLink.Acceptance.Tests.Support;
 
 internal static class WorkflowTestSupport
 {
@@ -58,61 +58,6 @@ internal static class WorkflowTestSupport
 
         return user;
     }
-
-    public static BloodNeed AddNeed(
-        BloodLinkDbContext dbContext,
-        Guid facilityId,
-        string requestedByUserId,
-        BloodNeedStatus status = BloodNeedStatus.PendingReview,
-        int units = 4)
-    {
-        var need = new BloodNeed
-        {
-            Id = Guid.NewGuid(),
-            FacilityId = facilityId,
-            RequestedByUserId = requestedByUserId,
-            BloodType = BloodType.ONegative,
-            UnitsNeeded = units,
-            Urgency = UrgencyLevel.Urgent,
-            NeededByUtc = DateTime.UtcNow.AddHours(8),
-            Status = status,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
-
-        dbContext.BloodNeeds.Add(need);
-        dbContext.SaveChanges();
-        return need;
-    }
-
-    public static BloodRequest AddRequest(
-        BloodLinkDbContext dbContext,
-        Guid needId,
-        Guid requestingFacilityId,
-        Guid sourceFacilityId,
-        BloodRequestStatus status = BloodRequestStatus.Sent,
-        int unitsRequested = 3,
-        int? unitsAccepted = null,
-        string requestedByAdminId = "admin-a")
-    {
-        var bloodRequest = new BloodRequest
-        {
-            Id = Guid.NewGuid(),
-            BloodNeedId = needId,
-            RequestingFacilityId = requestingFacilityId,
-            SourceFacilityId = sourceFacilityId,
-            BloodType = BloodType.ONegative,
-            UnitsRequested = unitsRequested,
-            UnitsAccepted = unitsAccepted,
-            Status = status,
-            RequestedByAdminId = requestedByAdminId,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        dbContext.BloodRequests.Add(bloodRequest);
-        dbContext.SaveChanges();
-        return bloodRequest;
-    }
 }
 
 internal sealed class FakeCurrentUserService : ICurrentUserService
@@ -133,9 +78,6 @@ internal sealed class FakeInventoryService : IInventoryService
     public int ReserveCalls { get; private set; }
     public int ReleaseCalls { get; private set; }
     public int FulfilCalls { get; private set; }
-    public bool FailReserve { get; set; }
-    public bool FailRelease { get; set; }
-    public bool FailFulfil { get; set; }
 
     public Task<IReadOnlyList<InventoryItemDto>> GetOwnInventoryAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<InventoryItemDto>>([]);
@@ -155,18 +97,18 @@ internal sealed class FakeInventoryService : IInventoryService
     public Task ReserveForRequestAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
     {
         ReserveCalls++;
-        return FailReserve ? Task.FromException(new InvalidOperationException("reserve failed")) : Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     public Task ReleaseReservationAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
     {
         ReleaseCalls++;
-        return FailRelease ? Task.FromException(new InvalidOperationException("release failed")) : Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     public Task FulfilTransferAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
     {
         FulfilCalls++;
-        return FailFulfil ? Task.FromException(new InvalidOperationException("fulfil failed")) : Task.CompletedTask;
+        return Task.CompletedTask;
     }
 }
