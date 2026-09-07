@@ -16,12 +16,17 @@ secrets.json
 *.secrets.json
 appsettings.Local.json
 appsettings.Production.json
+appsettings.Development.json
+launchSettings.json
 *.pfx
 *.pem
 *.key
 *.crt
 .env
 .env.*
+
+# Local database files
+*.db
 
 # Build and publish output
 artifacts/
