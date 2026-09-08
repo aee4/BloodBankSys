@@ -1,0 +1,169 @@
+@page "/facility/register"
+@layout PublicLayout
+@rendermode InteractiveServer
+@inject IServiceProvider Services
+@inject ILogger<FacilityRegister> Logger
+
+<PageTitle>Register Your Facility | BloodLink</PageTitle>
+
+<main class="bl-form-page">
+    <div class="bl-form-page-inner">
+        <a class="bl-back-link" href="/"><AppIcon Name="arrow-left" Size="15" /> Back to home</a>
+
+        @if (_submitted)
+        {
+            <section class="bl-form-card bl-success-card" aria-labelledby="registration-complete-title" aria-live="polite">
+                <span class="bl-success-icon"><AppIcon Name="circle-check" Size="32" /></span>
+                <h1 id="registration-complete-title">Registration submitted</h1>
+                <p>Thank you for registering your facility. The BloodLink team will review your details and contact the administrator you provided.</p>
+                <a class="bl-btn bl-btn-primary" href="/">Return to home</a>
+            </section>
+        }
+        else
+        {
+            <section class="bl-form-card" aria-labelledby="register-title">
+                <div class="bl-form-card-heading">
+                    <span class="bl-form-logo"><AppIcon Name="droplet" Size="21" Filled="true" /></span>
+                    <h1 id="register-title">Register your facility</h1>
+                    <p>Join BloodLink to coordinate blood inventory and requests with approved facilities across Ghana.</p>
+                </div>
+
+                <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="facility-registration" novalidate>
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="bl-validation-summary" />
+
+                    <fieldset class="bl-fieldset">
+                        <legend>Facility information</legend>
+                        <div class="bl-form-grid">
+                            <div class="bl-field bl-field-full">
+                                <label class="bl-label" for="facility-name">Facility name <span>*</span></label>
+                                <InputText id="facility-name" class="bl-input" @bind-Value="_model.Name" autocomplete="organization" placeholder="e.g. Korle Bu Teaching Hospital" required aria-required="true" />
+                                <ValidationMessage For="() => _model.Name" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="facility-type">Facility type <span>*</span></label>
+                                <InputSelect id="facility-type" class="bl-input bl-select" @bind-Value="_model.FacilityType" required aria-required="true">
+                                    <option value="">Select facility type</option>
+                                    <option value="@FacilityType.Hospital">Hospital</option>
+                                    <option value="@FacilityType.BloodBank">Blood Bank</option>
+                                </InputSelect>
+                                <ValidationMessage For="() => _model.FacilityType" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="registration-number">Registration number <span>*</span></label>
+                                <InputText id="registration-number" class="bl-input" @bind-Value="_model.RegistrationNumber" placeholder="Enter registration number" required aria-required="true" />
+                                <ValidationMessage For="() => _model.RegistrationNumber" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="region">Region <span>*</span></label>
+                                <InputSelect id="region" class="bl-input bl-select" @bind-Value="_model.Region" required aria-required="true">
+                                    <option value="">Select region</option>
+                                    @foreach (var region in Regions) { <option value="@region">@region</option> }
+                                </InputSelect>
+                                <ValidationMessage For="() => _model.Region" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="city">City / Town <span>*</span></label>
+                                <InputText id="city" class="bl-input" @bind-Value="_model.City" autocomplete="address-level2" placeholder="Enter city or town" required aria-required="true" />
+                                <ValidationMessage For="() => _model.City" />
+                            </div>
+                            <div class="bl-field bl-field-full">
+                                <label class="bl-label" for="address">Facility address <span>*</span></label>
+                                <InputTextArea id="address" class="bl-input bl-textarea" @bind-Value="_model.Address" autocomplete="street-address" placeholder="Enter the facility's physical address" required aria-required="true" />
+                                <ValidationMessage For="() => _model.Address" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="contact-email">Contact email <span>*</span></label>
+                                <InputText id="contact-email" class="bl-input" type="email" @bind-Value="_model.ContactEmail" autocomplete="email" placeholder="facility@example.com" required aria-required="true" />
+                                <ValidationMessage For="() => _model.ContactEmail" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="contact-phone">Contact phone <span>*</span></label>
+                                <InputText id="contact-phone" class="bl-input" type="tel" @bind-Value="_model.ContactPhone" autocomplete="tel" placeholder="+233 00 000 0000" required aria-required="true" />
+                                <ValidationMessage For="() => _model.ContactPhone" />
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="bl-fieldset">
+                        <legend>Facility administrator</legend>
+                        <p class="bl-fieldset-help">This person will become the primary administrator after the facility is approved.</p>
+                        <div class="bl-form-grid">
+                            <div class="bl-field">
+                                <label class="bl-label" for="admin-first-name">First name <span>*</span></label>
+                                <InputText id="admin-first-name" class="bl-input" @bind-Value="_model.AdminFirstName" autocomplete="given-name" placeholder="First name" required aria-required="true" />
+                                <ValidationMessage For="() => _model.AdminFirstName" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="admin-last-name">Last name <span>*</span></label>
+                                <InputText id="admin-last-name" class="bl-input" @bind-Value="_model.AdminLastName" autocomplete="family-name" placeholder="Last name" required aria-required="true" />
+                                <ValidationMessage For="() => _model.AdminLastName" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="admin-email">Email address <span>*</span></label>
+                                <InputText id="admin-email" class="bl-input" type="email" @bind-Value="_model.AdminEmail" autocomplete="email" placeholder="admin@example.com" required aria-required="true" />
+                                <ValidationMessage For="() => _model.AdminEmail" />
+                            </div>
+                            <div class="bl-field">
+                                <label class="bl-label" for="admin-phone">Phone number <span>*</span></label>
+                                <InputText id="admin-phone" class="bl-input" type="tel" @bind-Value="_model.AdminPhoneNumber" autocomplete="tel" placeholder="+233 00 000 0000" required aria-required="true" />
+                                <ValidationMessage For="() => _model.AdminPhoneNumber" />
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <AlertMessage Variant="info"><span>Submitting this form does not grant immediate access. Your facility must be reviewed and approved first.</span></AlertMessage>
+                    @if (_serviceError is not null) { <AlertMessage Variant="danger" Title="Registration not submitted"><span>@_serviceError</span></AlertMessage> }
+
+                    <div class="bl-form-actions">
+                        <a class="bl-btn bl-btn-outline" href="/">Cancel</a>
+                        <button class="bl-btn bl-btn-danger" type="submit" disabled="@_isSubmitting">
+                            @if (_isSubmitting) { <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Submitting...</span> }
+                            else { <span>Submit Registration</span> <AppIcon Name="arrow-right" Size="16" /> }
+                        </button>
+                    </div>
+                </EditForm>
+            </section>
+        }
+    </div>
+</main>
+
+@code {
+    private readonly FacilityRegistrationModel _model = new();
+    private bool _isSubmitting;
+    private bool _submitted;
+    private string? _serviceError;
+
+    private static readonly string[] Regions =
+    [
+        "Ahafo", "Ashanti", "Bono", "Bono East", "Central", "Eastern", "Greater Accra", "North East",
+        "Northern", "Oti", "Savannah", "Upper East", "Upper West", "Volta", "Western", "Western North"
+    ];
+
+    private async Task HandleSubmit()
+    {
+        _isSubmitting = true;
+        _serviceError = null;
+        try
+        {
+            var service = Services.GetService(typeof(IFacilityService)) as IFacilityService;
+            if (service is null)
+            {
+                _serviceError = "Facility registration is not connected yet. No application has been submitted.";
+                return;
+            }
+
+            await service.RegisterFacilityAsync(_model.ToRequest());
+            _submitted = true;
+        }
+        catch (Exception exception)
+        {
+            Logger.LogError(exception, "Facility registration failed.");
+            _serviceError = "We couldn't submit your registration. Please try again later or contact BloodLink support.";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}

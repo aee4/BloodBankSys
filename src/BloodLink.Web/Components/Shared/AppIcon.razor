@@ -1,0 +1,74 @@
+<svg class="bl-icon @Class" width="@Size" height="@Size" viewBox="0 0 24 24"
+     fill="@(Filled ? "currentColor" : "none")" stroke="currentColor" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    @switch (Name)
+    {
+        case "arrow-left":
+            <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+            break;
+        case "arrow-right":
+            <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
+            break;
+        case "bell":
+            <path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+            break;
+        case "building":
+            <path d="M6 22V4c0-.5.4-1 1-1h10c.6 0 1 .5 1 1v18" /><path d="M6 12H4c-.6 0-1 .4-1 1v9" /><path d="M18 9h2c.6 0 1 .4 1 1v12" /><path d="M10 6h4" /><path d="M10 10h4" /><path d="M10 14h4" /><path d="M10 18h4" /><path d="M2 22h20" />
+            break;
+        case "circle-alert":
+            <circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" />
+            break;
+        case "circle-check":
+            <path d="M21.801 10A10 10 0 1 1 17 3.335" /><path d="m9 11 3 3L22 4" />
+            break;
+        case "droplet":
+            <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.5-2.5-5.5L12 3l-4.5 6.5C6 11.5 5 13 5 15a7 7 0 0 0 7 7z" />
+            break;
+        case "eye":
+            <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0" /><circle cx="12" cy="12" r="3" />
+            break;
+        case "eye-off":
+            <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" /><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242" /><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143" /><path d="m2 2 20 20" />
+            break;
+        case "file-text":
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><line x1="16" x2="8" y1="13" y2="13" /><line x1="16" x2="8" y1="17" y2="17" /><line x1="10" x2="8" y1="9" y2="9" />
+            break;
+        case "inbox":
+            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+            break;
+        case "loader":
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            break;
+        case "mail":
+            <rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+            break;
+        case "menu":
+            <line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" />
+            break;
+        case "network":
+            <rect x="16" y="16" width="6" height="6" rx="1" /><rect x="2" y="16" width="6" height="6" rx="1" /><rect x="9" y="2" width="6" height="6" rx="1" /><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" /><path d="M12 12V8" />
+            break;
+        case "package":
+            <path d="m7.5 4.27 9 5.15" /><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" />
+            break;
+        case "phone":
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            break;
+        case "shield":
+            <path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z" />
+            break;
+        case "x":
+            <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+            break;
+        case "zap":
+            <path d="M4 14a1 1 0 0 1-.78-1.63l9-11a.5.5 0 0 1 .87.42l-1.67 6.68A1 1 0 0 0 12.39 10H20a1 1 0 0 1 .78 1.63l-9 11a.5.5 0 0 1-.87-.42l1.67-6.68A1 1 0 0 0 11.61 14z" />
+            break;
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = string.Empty;
+    [Parameter] public int Size { get; set; } = 20;
+    [Parameter] public bool Filled { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

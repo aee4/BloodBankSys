@@ -1,0 +1,8 @@
+<div class="bl-state bl-loading-state" role="status" aria-live="polite">
+    <span class="bl-state-icon"><AppIcon Name="loader" Size="22" Class="bl-spin" /></span>
+    <span>@Message</span>
+</div>
+
+@code {
+    [Parameter] public string Message { get; set; } = "Loading...";
+}

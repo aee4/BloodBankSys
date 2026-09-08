@@ -1,0 +1,13 @@
+<div class="bl-state bl-empty-state">
+    <span class="bl-state-icon"><AppIcon Name="@Icon" Size="24" /></span>
+    <h2>@Title</h2>
+    <p>@Description</p>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public string Icon { get; set; } = "inbox";
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Description { get; set; } = string.Empty;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

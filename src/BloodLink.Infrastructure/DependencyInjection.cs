@@ -2,6 +2,7 @@ using BloodLink.Application.Contracts;
 using BloodLink.Application.Interfaces;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
+using BloodLink.Infrastructure.Services.Inventory;
 using BloodLink.Infrastructure.Services.Dashboard;
 using BloodLink.Infrastructure.Services.Facilities;
 using BloodLink.Infrastructure.Services.Needs;
@@ -51,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<IBloodRequestService, BloodRequestService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IInventoryService, InventoryService>();
 
         return services;
     }

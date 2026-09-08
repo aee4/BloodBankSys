@@ -1,0 +1,55 @@
+@page "/account/login"
+@layout PublicLayout
+@rendermode InteractiveServer
+
+<PageTitle>Facility Login | BloodLink</PageTitle>
+
+<main class="bl-auth-page">
+    <AuthAside />
+    <section class="bl-auth-content" aria-labelledby="login-title">
+        <div class="bl-auth-panel">
+            <div class="bl-auth-mobile-brand"><BloodLinkBrand /></div>
+            <div class="bl-auth-heading">
+                <h1 id="login-title">Welcome back</h1>
+                <p>Sign in to your facility's BloodLink account.</p>
+            </div>
+
+            <EditForm Model="_model" OnValidSubmit="HandleLogin" FormName="facility-login" class="bl-auth-form" novalidate>
+                <DataAnnotationsValidator />
+                <div class="bl-field">
+                    <label class="bl-label" for="login-email">Email address</label>
+                    <InputText id="login-email" class="bl-input" type="email" @bind-Value="_model.Email" autocomplete="username" placeholder="you@facility.com" required aria-required="true" />
+                    <ValidationMessage For="() => _model.Email" />
+                </div>
+                <div class="bl-field">
+                    <div class="bl-label-row">
+                        <label class="bl-label" for="login-password">Password</label>
+                        <a href="/account/forgot-password">Forgot password?</a>
+                    </div>
+                    <div class="bl-password-field">
+                        <InputText id="login-password" class="bl-input" type="@(_showPassword ? "text" : "password")" @bind-Value="_model.Password" autocomplete="current-password" placeholder="Enter your password" required aria-required="true" />
+                        <button type="button" class="bl-password-toggle" @onclick="TogglePassword" aria-label="@(_showPassword ? "Hide password" : "Show password")">
+                            <AppIcon Name="@(_showPassword ? "eye-off" : "eye")" Size="18" />
+                        </button>
+                    </div>
+                    <ValidationMessage For="() => _model.Password" />
+                </div>
+                <label class="bl-checkbox-row"><InputCheckbox @bind-Value="_model.RememberMe" /> <span>Remember me on this device</span></label>
+                @if (_serviceError is not null) { <AlertMessage Variant="danger"><span>@_serviceError</span></AlertMessage> }
+                <button class="bl-btn bl-btn-danger bl-btn-block" type="submit">Log In <AppIcon Name="arrow-right" Size="16" /></button>
+            </EditForm>
+
+            <div class="bl-security-note"><AppIcon Name="shield" Size="13" /><span>Your connection is secure and encrypted.</span></div>
+            <a class="bl-auth-home-link" href="/"><AppIcon Name="arrow-left" Size="14" /> Back to BloodLink home</a>
+        </div>
+    </section>
+</main>
+
+@code {
+    private readonly LoginFormModel _model = new();
+    private bool _showPassword;
+    private string? _serviceError;
+
+    private void TogglePassword() => _showPassword = !_showPassword;
+    private void HandleLogin() => _serviceError = "Sign-in is not connected yet. Your credentials were not submitted.";
+}

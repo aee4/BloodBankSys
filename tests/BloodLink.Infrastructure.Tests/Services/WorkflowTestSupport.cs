@@ -146,6 +146,9 @@ internal sealed class FakeInventoryService : IInventoryService
     public Task<IReadOnlyList<InventoryTransactionDto>> GetTransactionHistoryAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<InventoryTransactionDto>>([]);
 
+    public Task<IReadOnlyList<LowStockAlertDto>> GetLowStockAlertsAsync(LowStockQueryRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<LowStockAlertDto>>([]);
+
     public Task<IReadOnlyList<AvailabilityResultDto>> SearchAvailabilityAsync(AvailabilitySearchRequest request, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<AvailabilityResultDto>>([]);
 
