@@ -1,4 +1,10 @@
+using BloodLink.Application.Interfaces;
+using BloodLink.Infrastructure.Data;
+using BloodLink.Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace BloodLink.Web.Tests;
 
@@ -13,7 +19,7 @@ public sealed class SmokeTests
     [Fact]
     public void ApplicationUser_HasRequiredFacilityScopingFields()
     {
-        var type = typeof(BloodLink.Infrastructure.Identity.ApplicationUser);
+        var type = typeof(ApplicationUser);
         Assert.NotNull(type.GetProperty("FacilityId"));
         Assert.NotNull(type.GetProperty("IsActive"));
     }
@@ -21,12 +27,55 @@ public sealed class SmokeTests
     [Fact]
     public void Application_StartsWithoutDependencyInjectionErrors()
     {
-        // This will attempt to build the WebApplication host.
-        // If there are any DI misconfigurations (e.g., missing services), 
-        // CreateClient() will throw the AggregateException during startup.
         using var factory = new WebApplicationFactory<Program>();
         var client = factory.CreateClient();
-
         Assert.NotNull(client);
     }
+
+    [Theory]
+    [InlineData(typeof(IBloodNeedService))]
+    [InlineData(typeof(IBloodRequestService))]
+    [InlineData(typeof(ICurrentUserService))]
+    [InlineData(typeof(IDashboardService))]
+    [InlineData(typeof(IFacilityService))]
+    [InlineData(typeof(IInventoryService))]
+    [InlineData(typeof(INotificationService))]
+    [InlineData(typeof(IStaffService))]
+    public void CoreApplicationServices_CanBeResolvedFromServiceScope(Type serviceType)
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var scope = factory.Services.CreateScope();
+        var service = scope.ServiceProvider.GetService(serviceType);
+        Assert.NotNull(service);
+    }
+
+    [Fact]
+    public void DatabaseContextFactory_IsRegistered()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var scope = factory.Services.CreateScope();
+        var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<BloodLinkDbContext>>();
+        Assert.NotNull(dbFactory);
+    }
+
+    [Fact]
+    public void IdentityServices_AreRegistered()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using var scope = factory.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetService<UserManager<ApplicationUser>>();
+        var signInManager = scope.ServiceProvider.GetService<SignInManager<ApplicationUser>>();
+        Assert.NotNull(userManager);
+        Assert.NotNull(signInManager);
+    }
+
+    [Fact]
+    public async Task Application_RootEndpoint_RespondsWithoutCrashing()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        var client = factory.CreateClient();
+        var response = await client.GetAsync("/");
+        Assert.True((int)response.StatusCode < 500, $"Root endpoint failed with status code {response.StatusCode}");
+    }
 }
+

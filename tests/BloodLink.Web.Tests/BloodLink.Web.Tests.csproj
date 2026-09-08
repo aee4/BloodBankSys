@@ -16,6 +16,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\BloodLink.Application\BloodLink.Application.csproj" />
+    <ProjectReference Include="..\..\src\BloodLink.Infrastructure\BloodLink.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\BloodLink.Web\BloodLink.Web.csproj" />
   </ItemGroup>
 
