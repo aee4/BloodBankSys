@@ -9,7 +9,7 @@ public sealed class SmokeTests
     {
         Assert.Equal("BloodLink.Web", typeof(Program).Assembly.GetName().Name);
     }
-    
+
     [Fact]
     public void ApplicationUser_HasRequiredFacilityScopingFields()
     {
@@ -26,7 +26,7 @@ public sealed class SmokeTests
         // CreateClient() will throw the AggregateException during startup.
         using var factory = new WebApplicationFactory<Program>();
         var client = factory.CreateClient();
-        
+
         Assert.NotNull(client);
     }
 }
