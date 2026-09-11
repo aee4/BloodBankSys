@@ -1,0 +1,23 @@
+@page "/account/manage"
+@layout PublicLayout
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+
+<PageTitle>Your Account | BloodLink</PageTitle>
+<main class="bl-auth-page">
+    <section class="bl-auth-content">
+        <div class="bl-auth-panel">
+            <h1>Your account</h1>
+            <p>You are signed in to BloodLink.</p>
+            @if (Status == "password-changed") { <AlertMessage>Your password has been changed.</AlertMessage> }
+            <a href="/account/change-password">Change password</a>
+            <form method="post" action="/account/logout" data-enhance="false">
+                <AntiforgeryToken />
+                <button class="bl-btn bl-btn-danger" type="submit">Sign out</button>
+            </form>
+        </div>
+    </section>
+</main>
+
+@code {
+    [SupplyParameterFromQuery] public string? Status { get; set; }
+}
