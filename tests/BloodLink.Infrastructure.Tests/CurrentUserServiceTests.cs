@@ -309,6 +309,8 @@ public sealed class CurrentUserServiceTests
         if (facilityId is { } id)
             dbContext.Facilities.Add(new Facility { Id = id, Status = FacilityStatus.Approved });
         dbContext.Users.Add(user);
+        if (roleName == "FacilityStaff" && facilityId is { } staffFacility)
+            dbContext.FacilityStaff.Add(new FacilityStaff { UserId = userId, FacilityId = staffFacility, Status = StaffStatus.Active });
         AddRole(dbContext, userId, roleName ?? (facilityId is null ? "SystemAdmin" : "FacilityAdmin"));
         dbContext.SaveChanges();
 

@@ -179,6 +179,8 @@ public sealed class AuthorizationPolicyTests
             var role = new IdentityRole(roleName);
             Database.Facilities.Add(Facility);
             Database.Users.Add(User);
+            if (roleName == RoleNames.FacilityStaff)
+                Database.FacilityStaff.Add(new FacilityStaff { UserId = User.Id, FacilityId = Facility.Id, Status = StaffStatus.Active });
             Database.Roles.Add(role);
             Database.UserRoles.Add(new IdentityUserRole<string> { UserId = User.Id, RoleId = role.Id });
             Database.SaveChanges();

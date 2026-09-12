@@ -151,11 +151,38 @@ public sealed class AccountProtectionTests
             await PostAsync(client, "/account/forgot-password", "/account/forgot-password", ("Email", user.Email!));
             await app.Delivery.WaitForAttemptsAsync(1);
             var queue = app.Services.GetRequiredService<PasswordRecoveryQueue>();
-            for (var i = 0; i < 100; i++) Assert.True(queue.TryEnqueue("missing@example.test"));
-            Assert.False(queue.TryEnqueue("missing@example.test"));
+            for (var i = 0; i < 100; i++) Assert.True(queue.TryEnqueue($"missing-{i}@example.test"));
+            Assert.False(queue.TryEnqueue("over-capacity@example.test"));
             Assert.Equal("/account/forgot-password?status=requested", (await PostAsync(client,
                 "/account/forgot-password", "/account/forgot-password", ("Email", user.Email!))).Headers.Location!.OriginalString);
         }
         finally { gate.TrySetResult(); }
+    }
+
+    [Fact]
+    public async Task RecoveryBurst_CoalescesQueuedRecipientsWithoutDisclosingAccounts()
+    {
+        using var app = new SecurityTestApplication();
+        var user = await app.SeedAsync();
+        var sentinel = await app.SeedAsync();
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        app.Delivery.BlockUntil = gate.Task;
+        using var client = app.Browser();
+        try
+        {
+            await PostAsync(client, "/account/forgot-password", "/account/forgot-password", ("Email", user.Email!));
+            await app.Delivery.WaitForAttemptsAsync(1);
+            var queue = app.Services.GetRequiredService<PasswordRecoveryQueue>();
+            for (var i = 0; i < 200; i++) Assert.True(queue.TryEnqueue(i % 2 == 0 ? user.Email! : user.Email!.ToUpperInvariant()));
+            Assert.True(queue.TryEnqueue(sentinel.Email!));
+            foreach (var email in new[] { user.Email!, "unknown@example.test" })
+                Assert.Equal("/account/forgot-password?status=requested", (await PostAsync(client,
+                    "/account/forgot-password", "/account/forgot-password", ("Email", email))).Headers.Location!.OriginalString);
+        }
+        finally { gate.TrySetResult(); }
+        // One in flight + one queued for the repeated recipient, then a distinct FIFO marker.
+        await app.Delivery.WaitForMessagesAsync(3);
+        Assert.Equal(2, app.Delivery.Messages.Count(message => message.Email == user.Email));
+        Assert.Single(app.Delivery.Messages, message => message.Email == sentinel.Email);
     }
 }

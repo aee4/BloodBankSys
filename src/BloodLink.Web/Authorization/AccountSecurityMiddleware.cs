@@ -17,6 +17,12 @@ public sealed class AccountSecurityMiddleware(RequestDelegate next)
         if (context.User.Identity?.IsAuthenticated == true)
         {
             var account = await access.FindAsync(context.User.FindFirstValue(ClaimTypes.NameIdentifier), context.RequestAborted);
+            if (account?.CanOperate != true && context.Request.Path.StartsWithSegments("/_blazor"))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await context.Response.WriteAsync("Operational access unavailable.");
+                return;
+            }
             if (account?.User.MustChangePassword == true && !IsPasswordChangeAction(context.Request.Path))
             {
                 if (HttpMethods.IsGet(context.Request.Method) && !context.Request.Path.StartsWithSegments("/_blazor"))

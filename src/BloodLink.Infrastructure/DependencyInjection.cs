@@ -37,6 +37,9 @@ public static class DependencyInjection
                 options.SignIn.RequireConfirmedAccount = false;
                 options.Password.RequiredLength = 8;
                 options.Password.RequireNonAlphanumeric = false;
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddRoles<IdentityRole>()
             .AddEntityFrameworkStores<BloodLinkDbContext>()

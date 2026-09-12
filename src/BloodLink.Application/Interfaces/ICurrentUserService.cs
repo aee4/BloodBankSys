@@ -12,11 +12,11 @@ public interface ICurrentUserService
     string? UserId { get; }
     /// <summary>Whether the principal was authenticated, not whether its account/session is currently valid.</summary>
     bool IsAuthenticated { get; }
-    /// <summary>Fresh effective roles; empty for stale, inactive, blocked or password-restricted sessions.</summary>
+    /// <summary>Fresh effective roles; staff authority requires an Active, matching FacilityStaff row.</summary>
     IReadOnlyCollection<string> Roles { get; }
     /// <summary>Authoritative facility scope for an operational facility user; otherwise null.</summary>
     Guid? FacilityId { get; }
-    /// <summary>Operational session eligibility, including stamp, roles, facility and mandatory password change.</summary>
+    /// <summary>Operational session eligibility, including stamp, roles, facility, staff lifecycle and mandatory password change.</summary>
     bool IsActive { get; }
     /// <summary>Checks a fresh effective role. Does not replace target-record ownership checks.</summary>
     bool IsInRole(string roleName);

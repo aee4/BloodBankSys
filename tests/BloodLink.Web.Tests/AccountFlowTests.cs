@@ -21,6 +21,7 @@ public sealed class AccountFlowTests
     [InlineData("/security-probe/admin")]
     [InlineData("/security-probe/staff")]
     [InlineData("/security-probe/system")]
+    [InlineData("/security-probe/operational")]
     public async Task AnonymousProtectedRequest_RedirectsToLogin(string path)
     {
         using var app = new SecurityTestApplication();

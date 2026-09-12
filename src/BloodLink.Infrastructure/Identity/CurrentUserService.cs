@@ -32,7 +32,7 @@ public sealed class CurrentUserService(
 
             var account = access.Find(userId);
             return access.MatchesSession(principal, account) && account?.CanOperate == true
-                ? account.IsSystemAdmin ? new[] { BloodLink.Application.Contracts.RoleNames.SystemAdmin } : account.Roles
+                ? account.OperationalRoles
                 : Array.Empty<string>();
         }
     }
