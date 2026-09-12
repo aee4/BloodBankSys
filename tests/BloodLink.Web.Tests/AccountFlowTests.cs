@@ -205,6 +205,7 @@ public sealed class AccountFlowTests
             var result = await PostAsync(client, "/account/forgot-password", "/account/forgot-password", ("Email", email));
             Assert.Equal("/account/forgot-password?status=requested", result.Headers.Location!.OriginalString);
         }
+        await app.Delivery.WaitForMessagesAsync(1);
         Assert.Single(app.Delivery.Messages);
         Assert.StartsWith("https://localhost/account/reset-password?", app.Delivery.Messages[0].Url);
         app.Delivery.Fail = true;
@@ -280,7 +281,9 @@ public sealed class AccountFlowTests
 
     private static async Task<string> RequestCodeAsync(SecurityTestApplication app, HttpClient client, ApplicationUser user)
     {
+        var expected = app.Delivery.Messages.Count + 1;
         await PostAsync(client, "/account/forgot-password", "/account/forgot-password", ("Email", user.Email!));
+        await app.Delivery.WaitForMessagesAsync(expected);
         return QueryHelpers.ParseQuery(new Uri(app.Delivery.Messages.Last().Url).Query)["code"].ToString();
     }
 

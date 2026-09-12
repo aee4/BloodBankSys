@@ -13,18 +13,21 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddBloodLinkInfrastructure(builder.Configuration);
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 builder.Services.AddControllersWithViews();
+builder.Services.AddSingleton<PasswordRecoveryQueue>();
+builder.Services.AddHostedService(services => services.GetRequiredService<PasswordRecoveryQueue>());
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.OnRejected = async (context, cancellationToken) =>
         await context.HttpContext.Response.WriteAsync("Too many account requests. Please try again later.", cancellationToken);
-    options.AddPolicy("account", context => RateLimitPartition.GetFixedWindowLimiter(
-        context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 10,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0
-        }));
+    foreach (var policy in new[] { "account-login", "account-recovery", "account-password" })
+        options.AddPolicy(policy, context => RateLimitPartition.GetFixedWindowLimiter(
+            policy + ":" + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown"), _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 var app = builder.Build();

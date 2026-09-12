@@ -17,6 +17,73 @@ namespace BloodLink.Web.Tests;
 
 public sealed class SessionSecurityTests
 {
+    [Fact]
+    public async Task Logout_WhenStampUpdateFails_ClearsCookieButDoesNotClaimGlobalRevocation()
+    {
+        using var app = new SecurityTestApplication();
+        var user = await app.SeedAsync();
+        using var client = app.Browser();
+        await LoginAsync(client, user);
+        var principal = await app.PrincipalAsync(user.Id);
+        var page = await client.GetStringAsync("/account/manage");
+        var token = System.Text.RegularExpressions.Regex.Match(page,
+            "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        Assert.NotEmpty(token);
+        app.RejectUserUpdates = true;
+        var result = await client.PostAsync("/account/logout", new FormUrlEncodedContent(
+            new Dictionary<string, string> { ["__RequestVerificationToken"] = WebUtility.HtmlDecode(token) }));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, result.StatusCode);
+        Assert.Contains("could not revoke all sessions", await result.Content.ReadAsStringAsync());
+        Assert.Contains("/account/login", (await client.GetAsync("/account/manage")).Headers.Location!.OriginalString);
+        using var scope = app.Services.CreateScope();
+        Assert.True(await scope.ServiceProvider.GetRequiredService<AccountAccessService>().ValidateSessionAsync(principal));
+    }
+
+    [Fact]
+    public async Task Logout_RevokesOtherCookiesAndRunningCircuit_AllowsFreshLogin_AndLeavesOtherUserValid()
+    {
+        using var app = new SecurityTestApplication();
+        var user = await app.SeedAsync();
+        var otherUser = await app.SeedAsync();
+        using var first = app.Browser();
+        using var second = app.Browser();
+        using var other = app.Browser();
+        var login = await LoginAsync(first, user);
+        await LoginAsync(second, user);
+        await LoginAsync(other, otherUser);
+        var oldPrincipal = await app.PrincipalAsync(user.Id);
+        using var scope = app.Services.CreateScope();
+        var access = scope.ServiceProvider.GetRequiredService<AccountAccessService>();
+        Assert.True(await access.ValidateSessionAsync(oldPrincipal));
+        Assert.Equal(HttpStatusCode.OK, (await second.GetAsync("/account/manage")).StatusCode);
+
+        using var provider = new ProbeProvider(app.Services.GetRequiredService<ILoggerFactory>(),
+            app.Services.GetRequiredService<IServiceScopeFactory>());
+        var signedOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        provider.AuthenticationStateChanged += async state =>
+        {
+            if ((await state).User.Identity?.IsAuthenticated != true) signedOut.TrySetResult();
+        };
+        provider.SetAuthenticationState(Task.FromResult(new AuthenticationState(oldPrincipal)));
+        var logout = await PostAsync(first, "/account/manage", "/account/logout");
+        Assert.Equal("/account/login?status=signed-out", logout.Headers.Location!.OriginalString);
+        Assert.False(await access.ValidateSessionAsync(oldPrincipal));
+        await signedOut.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity!.IsAuthenticated);
+        Assert.Contains("/account/login", (await first.GetAsync("/account/manage")).Headers.Location!.OriginalString);
+        Assert.Contains("/account/login", (await second.GetAsync("/account/manage")).Headers.Location!.OriginalString);
+
+        using var replay = app.Browser();
+        replay.DefaultRequestHeaders.Add("Cookie", login.Headers.GetValues("Set-Cookie")
+            .Single(c => c.StartsWith(".AspNetCore.Identity.Application=")).Split(';')[0]);
+        Assert.Contains("/account/login", (await replay.GetAsync("/account/manage")).Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.OK, (await other.GetAsync("/account/manage")).StatusCode);
+        Assert.True(await access.ValidateSessionAsync(await app.PrincipalAsync(otherUser.Id)));
+        Assert.Equal("/account/manage", (await LoginAsync(first, user)).Headers.Location!.OriginalString);
+        Assert.True(await access.ValidateSessionAsync(await app.PrincipalAsync(user.Id)));
+        Assert.Equal(HttpStatusCode.OK, (await first.GetAsync("/account/manage")).StatusCode);
+    }
+
     [Theory]
     [InlineData("deactivated")]
     [InlineData("deleted")]

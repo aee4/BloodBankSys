@@ -11,6 +11,7 @@
             @if (Status == "password-changed") { <AlertMessage>Your password has been changed.</AlertMessage> }
             <a href="/account/change-password">Change password</a>
             <form method="post" action="/account/logout" data-enhance="false">
+                <p>Signing out ends your sessions on all devices.</p>
                 <AntiforgeryToken />
                 <button class="bl-btn bl-btn-danger" type="submit">Sign out</button>
             </form>

@@ -1,5 +1,4 @@
 using System.Text;
-using BloodLink.Application.Security;
 using BloodLink.Domain.Entities;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
@@ -14,24 +13,25 @@ namespace BloodLink.Web.Authorization;
 // Razor components also register POST routes for SSR forms. Prefer these explicit HTTP actions.
 [Route("account", Order = -1)]
 [AutoValidateAntiforgeryToken]
-[EnableRateLimiting("account")]
 [RequestSizeLimit(16 * 1024)]
 public sealed class AccountController(
     UserManager<ApplicationUser> users,
     SignInManager<ApplicationUser> signIn,
-    AccountAccessService access,
-    IPasswordResetDelivery delivery,
-    IConfiguration configuration,
-    ILogger<AccountController> logger,
+    LoginFailureWork failureWork,
+    PasswordRecoveryQueue recovery,
     BloodLinkDbContext database) : Controller
 {
-    [AllowAnonymous, HttpPost("login")]
+    [AllowAnonymous, HttpPost("login"), EnableRateLimiting("account-login")]
     public async Task<IActionResult> Login([FromForm] LoginInput input)
     {
         const string failed = "/account/login?status=invalid";
         if (!ModelState.IsValid) return LocalRedirect(failed);
         var user = await users.FindByEmailAsync(input.Email.Trim());
-        if (user is null) return LocalRedirect(failed);
+        if (user is null)
+        {
+            failureWork.Verify(users.PasswordHasher, input.Password);
+            return LocalRedirect(failed);
+        }
 
         var result = await signIn.PasswordSignInAsync(user, input.Password, input.RememberMe, lockoutOnFailure: true);
         // This MVP has no MFA challenge UI: a RequiresTwoFactor result never becomes an application session.
@@ -47,14 +47,25 @@ public sealed class AccountController(
         return LocalRedirect(user.MustChangePassword ? "/account/change-password" : SafeReturnUrl(input.ReturnUrl));
     }
 
-    [Authorize(Policy = AccountSessionRequirement.Policy), HttpPost("logout")]
+    [Authorize(Policy = AccountSessionRequirement.Policy), HttpPost("logout"), DisableRateLimiting]
     public async Task<IActionResult> Logout()
     {
-        await signIn.SignOutAsync();
+        try
+        {
+            var user = await users.GetUserAsync(User);
+            if (user is not null && !(await users.UpdateSecurityStampAsync(user)).Succeeded)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    "Sign-out could not revoke all sessions. Sign in and retry.");
+        }
+        finally
+        {
+            // Clear the current browser cookie even when the backing store cannot rotate the stamp.
+            await signIn.SignOutAsync();
+        }
         return LocalRedirect("/account/login?status=signed-out");
     }
 
-    [Authorize(Policy = AccountSessionRequirement.Policy), HttpPost("change-password")]
+    [Authorize(Policy = AccountSessionRequirement.Policy), HttpPost("change-password"), EnableRateLimiting("account-password")]
     public async Task<IActionResult> ChangePassword([FromForm] ChangePasswordInput input)
     {
         const string failed = "/account/change-password?status=invalid";
@@ -75,38 +86,17 @@ public sealed class AccountController(
         return LocalRedirect("/account/manage?status=password-changed");
     }
 
-    [AllowAnonymous, HttpPost("forgot-password")]
-    public async Task<IActionResult> ForgotPassword([FromForm] ForgotPasswordInput input)
+    [AllowAnonymous, HttpPost("forgot-password"), EnableRateLimiting("account-recovery")]
+    public IActionResult ForgotPassword([FromForm] ForgotPasswordInput input)
     {
         // Same response for invalid, unknown, inactive, blocked and eligible accounts.
         const string completed = "/account/forgot-password?status=requested";
-        if (!ModelState.IsValid || !delivery.IsConfigured) return LocalRedirect(completed);
-        // Never build security links from the untrusted request Host header.
-        if (!Uri.TryCreate(configuration["Account:PublicOrigin"], UriKind.Absolute, out var origin)
-            || origin.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(origin.UserInfo)
-            || origin.AbsolutePath != "/" || !string.IsNullOrEmpty(origin.Query) || !string.IsNullOrEmpty(origin.Fragment))
-            return LocalRedirect(completed);
-
-        var user = await users.FindByEmailAsync(input.Email.Trim());
-        if (user is null || (await access.FindAsync(user.Id))?.CanSignIn != true) return LocalRedirect(completed);
-        var token = await users.GeneratePasswordResetTokenAsync(user);
-        var code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
-        var link = QueryHelpers.AddQueryString(new Uri(origin, "/account/reset-password").AbsoluteUri,
-            new Dictionary<string, string?> { ["email"] = user.Email, ["code"] = code });
-        try
-        {
-            await delivery.SendAsync(user.Email!, link, HttpContext.RequestAborted);
-        }
-        catch (Exception) when (!HttpContext.RequestAborted.IsCancellationRequested)
-        {
-            // Provider failures must not enumerate accounts or expose a token in an exception page/log.
-            logger.LogWarning("Password reset delivery failed. Check the configured delivery provider.");
-            return LocalRedirect(completed);
-        }
+        // Account lookup and variable provider latency are off the public response path.
+        if (ModelState.IsValid) recovery.TryEnqueue(input.Email.Trim());
         return LocalRedirect(completed);
     }
 
-    [AllowAnonymous, HttpPost("reset-password")]
+    [AllowAnonymous, HttpPost("reset-password"), EnableRateLimiting("account-password")]
     public async Task<IActionResult> ResetPassword([FromForm] ResetPasswordInput input)
     {
         const string failed = "/account/reset-password?status=invalid";

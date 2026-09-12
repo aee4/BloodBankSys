@@ -59,6 +59,7 @@ public static class DependencyInjection
         services.Configure<DataProtectionTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromHours(1));
         services.AddScoped<AccountAccessService>();
+        services.AddSingleton<LoginFailureWork>();
         services.TryAddSingleton<IPasswordResetDelivery, DisabledPasswordResetDelivery>();
         services.AddAuthorization(ConfigureAuthorization);
         services.AddScoped<IAuthorizationHandler, OperationalUserHandler>();

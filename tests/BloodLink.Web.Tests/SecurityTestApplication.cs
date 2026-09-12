@@ -1,4 +1,5 @@
 using System.Net;
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using BloodLink.Application.Contracts;
@@ -16,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace BloodLink.Web.Tests;
 
@@ -26,6 +28,8 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
     private readonly DbContextOptions<BloodLinkDbContext> options = new DbContextOptionsBuilder<BloodLinkDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
     public TestDelivery Delivery { get; } = new();
+    public PasswordWorkProbe PasswordWork { get; } = new();
+    public bool RejectUserUpdates { get; set; }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -41,6 +45,9 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
             services.AddSingleton<IDbContextFactory<BloodLinkDbContext>>(new TestContextFactory(options));
             services.AddScoped(_ => new BloodLinkDbContext(options));
             services.AddSingleton<IPasswordResetDelivery>(Delivery);
+            services.AddScoped<IPasswordHasher<ApplicationUser>>(provider => new ObservedPasswordHasher(
+                provider.GetRequiredService<IOptions<PasswordHasherOptions>>(), PasswordWork));
+            services.AddScoped<IUserValidator<ApplicationUser>>(_ => new UpdateFailureValidator(this));
             services.AddControllers().AddApplicationPart(typeof(SecurityProbeController).Assembly);
         });
     }
@@ -121,15 +128,69 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
 
     public sealed class TestDelivery : IPasswordResetDelivery
     {
+        private readonly ConcurrentQueue<(string Email, string Url)> messages = new();
+        private readonly SemaphoreSlim changed = new(0);
+        private int attempts;
         public bool IsConfigured { get; set; } = true;
         public bool Fail { get; set; }
-        public List<(string Email, string Url)> Messages { get; } = new();
-        public Task SendAsync(string email, string resetUrl, CancellationToken cancellationToken = default)
+        public Task? BlockUntil { get; set; }
+        public TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IReadOnlyList<(string Email, string Url)> Messages => messages.ToArray();
+        public int Attempts => Volatile.Read(ref attempts);
+        public async Task SendAsync(string email, string resetUrl, CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref attempts);
+            changed.Release();
+            try
+            {
+                if (BlockUntil is { } gate) await gate.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Canceled.TrySetResult();
+                throw;
+            }
             if (Fail) throw new InvalidOperationException("Simulated delivery failure");
-            Messages.Add((email, resetUrl));
-            return Task.CompletedTask;
+            messages.Enqueue((email, resetUrl));
+            changed.Release();
         }
+
+        public async Task WaitForMessagesAsync(int count)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (Messages.Count < count) await changed.WaitAsync(timeout.Token);
+        }
+
+        public async Task WaitForAttemptsAsync(int count)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (Attempts < count) await changed.WaitAsync(timeout.Token);
+        }
+    }
+
+    public sealed class PasswordWorkProbe
+    {
+        private int verifications;
+        public int Verifications => Volatile.Read(ref verifications);
+        public void Record() => Interlocked.Increment(ref verifications);
+    }
+
+    private sealed class ObservedPasswordHasher(IOptions<PasswordHasherOptions> options, PasswordWorkProbe probe)
+        : PasswordHasher<ApplicationUser>(options)
+    {
+        public override PasswordVerificationResult VerifyHashedPassword(ApplicationUser user, string hashedPassword, string providedPassword)
+        {
+            probe.Record();
+            return base.VerifyHashedPassword(user, hashedPassword, providedPassword);
+        }
+    }
+
+    private sealed class UpdateFailureValidator(SecurityTestApplication app) : IUserValidator<ApplicationUser>
+    {
+        public Task<IdentityResult> ValidateAsync(UserManager<ApplicationUser> manager, ApplicationUser user) =>
+            Task.FromResult(app.RejectUserUpdates
+                ? IdentityResult.Failed(new IdentityError { Code = "SimulatedUpdateFailure", Description = "Simulated update failure." })
+                : IdentityResult.Success);
     }
 
     private sealed class TestContextFactory(DbContextOptions<BloodLinkDbContext> options)
