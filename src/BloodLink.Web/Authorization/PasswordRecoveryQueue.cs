@@ -11,6 +11,8 @@ namespace BloodLink.Web.Authorization;
 public sealed class PasswordRecoveryQueue(IServiceScopeFactory scopes, ILogger<PasswordRecoveryQueue> logger)
     : BackgroundService
 {
+    private readonly object enqueueLock = new();
+    private readonly HashSet<string> queuedRecipients = new(StringComparer.Ordinal);
     private readonly Channel<string> requests = Channel.CreateBounded<string>(new BoundedChannelOptions(100)
     {
         SingleReader = true,
@@ -20,7 +22,18 @@ public sealed class PasswordRecoveryQueue(IServiceScopeFactory scopes, ILogger<P
 
     public bool TryEnqueue(string email)
     {
-        if (requests.Writer.TryWrite(email)) return true;
+        lock (enqueueLock)
+        {
+            var recipient = email.Trim().ToUpperInvariant();
+            // Coalesce queued duplicates regardless of account existence; public responses stay generic.
+            // Entries live only as long as the bounded queue item, never as an unbounded recipient history.
+            if (queuedRecipients.Contains(recipient)) return true;
+            if (requests.Writer.TryWrite(email))
+            {
+                queuedRecipients.Add(recipient);
+                return true;
+            }
+        }
         logger.LogWarning("Password recovery queue is unavailable. A recovery request was not queued.");
         return false;
     }
@@ -35,6 +48,7 @@ public sealed class PasswordRecoveryQueue(IServiceScopeFactory scopes, ILogger<P
     {
         await foreach (var email in requests.Reader.ReadAllAsync(stoppingToken))
         {
+            lock (enqueueLock) queuedRecipients.Remove(email.Trim().ToUpperInvariant());
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);

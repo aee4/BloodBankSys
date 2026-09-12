@@ -1,4 +1,5 @@
 using BloodLink.Infrastructure.Identity;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
 
@@ -14,7 +15,11 @@ public class IdentityRevalidatingAuthenticationStateProvider(
         AuthenticationState authenticationState, CancellationToken cancellationToken)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        return await scope.ServiceProvider.GetRequiredService<AccountAccessService>()
-            .ValidateSessionAsync(authenticationState.User, cancellationToken);
+        var access = scope.ServiceProvider.GetRequiredService<AccountAccessService>();
+        var principal = authenticationState.User;
+        var account = await access.FindAsync(principal.FindFirstValue(ClaimTypes.NameIdentifier), cancellationToken);
+        // Account setup uses static HTTP forms. Existing operational circuits must lose authority
+        // when staff activation or mandatory password state changes, even if the stamp is unchanged.
+        return access.MatchesSession(principal, account) && account?.CanOperate == true;
     }
 }

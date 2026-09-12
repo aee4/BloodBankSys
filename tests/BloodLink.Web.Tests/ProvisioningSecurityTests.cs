@@ -50,7 +50,8 @@ public sealed class ProvisioningSecurityTests
             "/account/reset-password?code=" + Uri.EscapeDataString(code), "/account/reset-password", ("Email", staffUser.Email!), ("Code", code),
             ("NewPassword", NewPassword), ("ConfirmPassword", NewPassword))).Headers.Location!.OriginalString);
         Assert.Equal("/account/manage", (await LoginAsync(client, staffUser, NewPassword)).Headers.Location!.OriginalString);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/security-probe/staff")).StatusCode);
+        Assert.Contains("awaiting activation", await client.GetStringAsync("/account/manage"));
+        Assert.Contains("/account/access-denied", (await client.GetAsync("/security-probe/staff")).Headers.Location!.OriginalString);
         Assert.Contains("/account/access-denied", (await client.GetAsync("/security-probe/admin")).Headers.Location!.OriginalString);
 
         using var verification = app.Services.CreateScope();
@@ -58,6 +59,10 @@ public sealed class ProvisioningSecurityTests
         Assert.False((await database.Users.SingleAsync(u => u.Id == staffUser.Id)).MustChangePassword);
         Assert.Equal(StaffStatus.PendingActivation,
             (await database.FacilityStaff.SingleAsync(s => s.UserId == staffUser.Id)).Status);
+        // Simulate the lifecycle owner's activation, without changing their production service.
+        (await database.FacilityStaff.SingleAsync(s => s.UserId == staffUser.Id)).Status = StaffStatus.Active;
+        await database.SaveChangesAsync();
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/security-probe/staff")).StatusCode);
     }
 
     private sealed class FixedAuthentication(ClaimsPrincipal user) : AuthenticationStateProvider

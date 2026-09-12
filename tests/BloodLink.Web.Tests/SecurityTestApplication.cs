@@ -30,10 +30,11 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
     public TestDelivery Delivery { get; } = new();
     public PasswordWorkProbe PasswordWork { get; } = new();
     public bool RejectUserUpdates { get; set; }
+    public string EnvironmentName { get; set; } = "Development";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Development");
+        builder.UseEnvironment(EnvironmentName);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             new Dictionary<string, string?> { ["Account:PublicOrigin"] = "https://localhost" }));
         builder.ConfigureServices(services =>
@@ -60,7 +61,8 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
     });
 
     public async Task<ApplicationUser> SeedAsync(string role = RoleNames.FacilityAdmin, bool mustChange = false,
-        bool active = true, FacilityStatus status = FacilityStatus.Approved, bool linked = true)
+        bool active = true, FacilityStatus status = FacilityStatus.Approved, bool linked = true,
+        StaffStatus staffStatus = StaffStatus.Active, bool staffRow = true)
     {
         using var scope = Services.CreateScope();
         var database = scope.ServiceProvider.GetRequiredService<BloodLinkDbContext>();
@@ -86,6 +88,17 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
         user.Email = user.UserName;
         Assert.True((await users.CreateAsync(user, Password)).Succeeded);
         Assert.True((await users.AddToRoleAsync(user, role)).Succeeded);
+        if (role == RoleNames.FacilityStaff && staffRow && facilityId is { } staffFacility)
+        {
+            database.FacilityStaff.Add(new FacilityStaff
+            {
+                UserId = user.Id,
+                FacilityId = staffFacility,
+                Status = staffStatus,
+                CreatedByAdminId = "test-admin"
+            });
+            await database.SaveChangesAsync();
+        }
         return user;
     }
 
@@ -204,6 +217,8 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
 [Route("security-probe")]
 public sealed class SecurityProbeController : ControllerBase
 {
+    [HttpGet("operational"), Authorize]
+    public IActionResult OperationalPage() => Ok();
     [HttpGet("system"), Authorize(Policy = AuthorizationPolicies.RequireSystemAdmin)]
     public IActionResult SystemPage() => Ok();
     [HttpGet("admin"), Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]

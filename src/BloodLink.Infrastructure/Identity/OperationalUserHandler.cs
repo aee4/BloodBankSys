@@ -25,7 +25,7 @@ public sealed class OperationalUserHandler(AccountAccessService access)
         }
 
         // Role grants require a refreshed principal; revocations take effect immediately.
-        if (!requirement.AllowedRoles.Any(role => context.User.IsInRole(role) && account.Roles.Contains(role)))
+        if (!requirement.AllowedRoles.Any(role => context.User.IsInRole(role) && account.OperationalRoles.Contains(role)))
         {
             return;
         }

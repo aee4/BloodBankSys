@@ -1,6 +1,8 @@
 @page "/account/manage"
 @layout PublicLayout
-@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = BloodLink.Infrastructure.Identity.AccountSessionRequirement.Policy)]
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider Authentication
+@inject BloodLink.Infrastructure.Identity.AccountAccessService Access
 
 <PageTitle>Your Account | BloodLink</PageTitle>
 <main class="bl-auth-page">
@@ -8,6 +10,10 @@
         <div class="bl-auth-panel">
             <h1>Your account</h1>
             <p>You are signed in to BloodLink.</p>
+            @if (AwaitingActivation)
+            {
+                <AlertMessage>Your staff account is awaiting activation. Operational access is unavailable. Contact your facility administrator.</AlertMessage>
+            }
             @if (Status == "password-changed") { <AlertMessage>Your password has been changed.</AlertMessage> }
             <a href="/account/change-password">Change password</a>
             <form method="post" action="/account/logout" data-enhance="false">
@@ -21,4 +27,12 @@
 
 @code {
     [SupplyParameterFromQuery] public string? Status { get; set; }
+    private bool AwaitingActivation { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        var account = await Access.FindAsync(principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
+        AwaitingActivation = account?.IsStaffOnly == true && !account.HasActiveStaffMembership;
+    }
 }
