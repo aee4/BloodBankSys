@@ -1,0 +1,16 @@
+@inject NavigationManager Navigation
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider Authentication
+@inject BloodLink.Infrastructure.Identity.AccountAccessService Access
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        var id = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var account = await Access.FindAsync(id);
+        var target = Access.MatchesSession(principal, account)
+            ? account!.User.MustChangePassword ? "/account/change-password" : "/account/access-denied"
+            : "/account/login?returnUrl=" + Uri.EscapeDataString("/" + Navigation.ToBaseRelativePath(Navigation.Uri));
+        Navigation.NavigateTo(target, forceLoad: true);
+    }
+}
