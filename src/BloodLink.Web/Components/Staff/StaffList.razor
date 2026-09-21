@@ -1,0 +1,264 @@
+@page "/staff"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IStaffService Staff
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>Staff | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Staff</h1>
+        <p class="bl-dash-subtitle">Facility staff accounts and access</p>
+    </div>
+    <a class="bl-btn bl-btn-primary" href="/staff/new">
+        <AppIcon Name="user-plus" Size="14" /> Add Staff Member
+    </a>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading staff..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can manage staff.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load staff">
+        <span>We couldn't load staff members right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_staff.Count == 0)
+{
+    <EmptyState Icon="users" Title="No staff members yet"
+                Description="Add facility staff accounts so they can submit blood needs.">
+        <a class="bl-btn bl-btn-primary" href="/staff/new">Add Staff Member</a>
+    </EmptyState>
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-table-wrap">
+            <table class="bl-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var member in _staff)
+                    {
+                        <tr>
+                            <td class="bl-strong">@member.FullName</td>
+                            <td class="bl-muted">@member.Email</td>
+                            <td class="bl-muted">Facility Staff</td>
+                            <td>
+                                <span class="bl-status-badge bl-status-@BloodDisplay.StaffStatusTone(member.Status)">
+                                    @BloodDisplay.StaffStatusLabel(member.Status)
+                                </span>
+                            </td>
+                            <td class="bl-right">
+                                <div class="bl-action-row">
+                                    @if (member.Status == StaffStatus.Inactive)
+                                    {
+                                        <button class="bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => BeginReactivate(member)'>
+                                            Reactivate
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => BeginDeactivate(member)'>
+                                            Deactivate
+                                        </button>
+                                    }
+                                    <button class="bl-btn-sm" type="button" @onclick='() => BeginReset(member)'>
+                                        Reset Password
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@if (_busy)
+{
+    <LoadingState Message="Updating staff account..." />
+}
+
+@if (_actionError is { Length: > 0 })
+{
+    <AlertMessage Variant="danger" Title="Couldn't update the staff account">
+        <span>@_actionError</span>
+    </AlertMessage>
+}
+
+@if (_success is { Length: > 0 })
+{
+    <AlertMessage Variant="success" Title="Done">
+        <span>@_success</span>
+    </AlertMessage>
+}
+
+@if (_confirming is not null && _target is not null)
+{
+    <div class="bl-modal-backdrop">
+        <div class="bl-modal">
+            <h3 class="bl-card-title">
+                @(_confirming == "deactivate" ? "Deactivate" : _confirming == "reset" ? "Reset Password" : "Reactivate")
+                @_target.FullName</h3>
+            <p class="bl-card-desc">
+                @(_confirming switch
+                {
+                    "deactivate" => "This staff member will immediately lose access to BloodLink.",
+                    "reactivate" => "This staff member's account will regain access to BloodLink.",
+                    _ => "A fresh temporary password will be set. The staff member must change it on next login."
+                })
+            </p>
+            @if (_confirming == "deactivate")
+            {
+                <label class="bl-label" for="staff-reason">Reason <span>*</span></label>
+                <InputTextArea id="staff-reason" class="bl-input" @bind-Value="_note" rows="3" placeholder="Required — why is this account being deactivated?" />
+            }
+            <div class="bl-confirm-actions">
+                <button class="bl-btn bl-btn-outline" type="button" @onclick="ResetConfirm">Cancel</button>
+                <button class="bl-btn @(_confirming == "deactivate" ? "bl-btn-danger" : "bl-btn-primary")" type="button"
+                        @onclick="ConfirmAsync"
+                        disabled='@(_confirming == "deactivate" && string.IsNullOrWhiteSpace(_note))'>
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<StaffDto> _staff = [];
+
+    private string? _confirming;
+    private StaffDto? _target;
+    private string? _note;
+    private bool _busy;
+    private string? _actionError;
+    private string? _success;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _staff = await Staff.ListOwnFacilityStaffAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void BeginDeactivate(StaffDto member)
+    {
+        _confirming = "deactivate";
+        _target = member;
+        _note = null;
+        _actionError = null;
+        _success = null;
+    }
+
+    private void BeginReactivate(StaffDto member)
+    {
+        _confirming = "reactivate";
+        _target = member;
+        _note = null;
+        _actionError = null;
+        _success = null;
+    }
+
+    private void BeginReset(StaffDto member)
+    {
+        _confirming = "reset";
+        _target = member;
+        _note = null;
+        _actionError = null;
+        _success = null;
+    }
+
+    private void ResetConfirm()
+    {
+        _confirming = null;
+        _target = null;
+        _note = null;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_target is null || _confirming is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _actionError = null;
+        _success = null;
+        try
+        {
+            switch (_confirming)
+            {
+                case "deactivate":
+                    await Staff.DeactivateStaffAsync(new ChangeStaffStatusRequest(_target.UserId, _note));
+                    _success = $"{_target.FullName} has been deactivated.";
+                    break;
+                case "reactivate":
+                    await Staff.ReactivateStaffAsync(new ChangeStaffStatusRequest(_target.UserId, _note));
+                    _success = $"{_target.FullName} has been reactivated.";
+                    break;
+                case "reset":
+                    await Staff.ResetTemporaryPasswordAsync(_target.UserId);
+                    _success = $"A new temporary password has been set for {_target.FullName}.";
+                    break;
+            }
+            ResetConfirm();
+            _staff = await Staff.ListOwnFacilityStaffAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _actionError = "You are not authorized to manage this staff account.";
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

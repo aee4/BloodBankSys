@@ -1,0 +1,163 @@
+@page "/staff/new"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.ComponentModel.DataAnnotations
+@inject IStaffService Staff
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Add Staff Member | BloodLink</PageTitle>
+
+<div class="bl-breadcrumb">
+    <a href="/staff">Staff</a>
+    <AppIcon Name="chevron-right" Size="12" />
+    <span>Add Staff Member</span>
+</div>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Add Staff Member</h1>
+        <p class="bl-dash-subtitle">Create a staff account for your facility</p>
+    </div>
+</div>
+
+@if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can add staff.</span>
+    </AlertMessage>
+}
+else if (_created is not null)
+{
+    <section class="bl-card bl-card-pad bl-panel">
+        <span class="bl-panel-icon bl-panel-icon-success">@BloodDisplay.FacilityTypeLabel(FacilityType.Hospital)</span>
+        <h2 class="bl-panel-title">Staff account created</h2>
+        <p class="bl-panel-desc">
+            A temporary password has been set for <strong>@_created.FullName</strong> (@_created.Email).
+            The staff member must create a new password when they first log in.
+        </p>
+        <div class="bl-panel-actions">
+            <a class="bl-btn bl-btn-primary" href="/staff/new"><AppIcon Name="user-plus" Size="14" /> Add Another</a>
+            <a class="bl-btn bl-btn-outline" href="/staff"><AppIcon Name="arrow-left" Size="14" /> Back to Staff</a>
+        </div>
+    </section>
+}
+else
+{
+    <section class="bl-card bl-card-pad">
+        <EditForm FormName="staff-create" Model="_model" OnValidSubmit="SubmitAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="bl-form-grid">
+                <div class="bl-field">
+                    <label class="bl-label" for="staff-first">First name <span>*</span></label>
+                    <InputText id="staff-first" class="bl-input" @bind-Value="_model.FirstName" placeholder="e.g. Jane" />
+                    <ValidationMessage For="() => _model.FirstName" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="staff-last">Last name <span>*</span></label>
+                    <InputText id="staff-last" class="bl-input" @bind-Value="_model.LastName" placeholder="e.g. Doe" />
+                    <ValidationMessage For="() => _model.LastName" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="staff-email">Email address <span>*</span></label>
+                    <InputText id="staff-email" class="bl-input" type="email" @bind-Value="_model.Email" placeholder="e.g. jane.doe@hospital.org" />
+                    <ValidationMessage For="() => _model.Email" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="staff-phone">Phone number</label>
+                    <InputText id="staff-phone" class="bl-input" @bind-Value="_model.PhoneNumber" placeholder="e.g. +1 555 123 4567" />
+                    <ValidationMessage For="() => _model.PhoneNumber" />
+                </div>
+            </div>
+
+            <div class="bl-field">
+                <label class="bl-label">Role</label>
+                <input class="bl-input" value="Facility Staff" disabled />
+            </div>
+
+            @if (_busy)
+            {
+                <LoadingState Message="Creating staff account..." />
+            }
+            @if (_actionError is { Length: > 0 })
+            {
+                <AlertMessage Variant="danger" Title="Couldn't create the account">
+                    <span>@_actionError</span>
+                </AlertMessage>
+            }
+
+            <div class="bl-form-actions">
+                <a class="bl-btn bl-btn-outline" href="/staff">Cancel</a>
+                <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
+                    <AppIcon Name="user-plus" Size="14" /> Create Staff Member
+                </button>
+            </div>
+        </EditForm>
+    </section>
+}
+
+@code {
+    private CreateStaffModel _model = new();
+    private StaffDto? _created;
+    private bool _busy;
+    private string? _actionError;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
+        {
+            _error = "no-access";
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            _created = await Staff.CreateStaffAsync(new CreateStaffRequest(
+                _model.FirstName,
+                _model.LastName,
+                _model.Email,
+                _model.PhoneNumber));
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _actionError = "You are not authorized to add staff.";
+        }
+        catch (Exception ex)
+        {
+            if (ex.Message.Contains("email", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("exist", StringComparison.OrdinalIgnoreCase))
+            {
+                _actionError = "An account with this email already exists.";
+            }
+            else
+            {
+                _actionError = ex.Message;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class CreateStaffModel
+    {
+        [Required(ErrorMessage = "First name is required")]
+        public string FirstName { get; set; } = "";
+
+        [Required(ErrorMessage = "Last name is required")]
+        public string LastName { get; set; } = "";
+
+        [Required(ErrorMessage = "Email is required")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address")]
+        public string Email { get; set; } = "";
+
+        [Phone(ErrorMessage = "Enter a valid phone number")]
+        public string? PhoneNumber { get; set; }
+    }
+}

@@ -15,7 +15,7 @@
 
             <form method="post" action="/account/login" class="bl-auth-form" data-enhance="false">
                 <AntiforgeryToken />
-                <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
+                <input type="hidden" name="ReturnUrl" value="@(string.IsNullOrEmpty(ReturnUrl) ? "/dashboard" : ReturnUrl)" />
                 <div class="bl-field">
                     <label class="bl-label" for="login-email">Email address</label>
                     <input id="login-email" name="Email" class="bl-input" type="email" maxlength="256" autocomplete="username" placeholder="you@facility.com" required aria-required="true" />

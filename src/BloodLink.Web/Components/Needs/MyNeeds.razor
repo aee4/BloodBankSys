@@ -1,0 +1,114 @@
+@page "/needs/mine"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IBloodNeedService Needs
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>My Needs | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">My Submitted Needs</h1>
+        <p class="bl-dash-subtitle">Blood needs you have submitted</p>
+    </div>
+    <a class="bl-btn bl-btn-primary" href="/needs/new">
+        <AppIcon Name="plus" Size="14" /> Submit New Need
+    </a>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading your needs..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility staff can view their submitted needs. <a class="bl-inline-link" href="/needs">View facility needs</a>.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load your needs">
+        <span>We couldn't load your needs right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_needs.Count == 0)
+{
+    <EmptyState Icon="clipboard-list" Title="No needs yet"
+                Description="Blood needs you submit will appear here.">
+        <a class="bl-btn bl-btn-primary" href="/needs/new">
+            <AppIcon Name="plus" Size="14" /> Submit Your First Need
+        </a>
+    </EmptyState>
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-table-wrap">
+            <table class="bl-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Blood Type</th>
+                        <th>Units</th>
+                        <th>Urgency</th>
+                        <th>Status</th>
+                        <th>Submitted</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var need in _needs)
+                    {
+                        <tr class="bl-tr-click" @onclick="() => Go(need.Id)">
+                            <td class="bl-mono">@BloodDisplay.ShortId(need.Id)</td>
+                            <td><BloodTypeBadge Value="need.BloodType" /></td>
+                            <td class="bl-strong">@need.UnitsNeeded</td>
+                            <td><span class="bl-status-badge bl-status-@BloodDisplay.UrgencyTone(need.Urgency)">@BloodDisplay.UrgencyLabel(need.Urgency)</span></td>
+                            <td><span class="bl-status-badge bl-status-@BloodDisplay.BloodNeedStatusTone(need.Status)">@BloodDisplay.BloodNeedStatusLabel(need.Status)</span></td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(need.CreatedAtUtc)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<BloodNeedDto> _needs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityStaff))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _needs = (await Needs.GetMineAsync())
+                .OrderByDescending(need => need.CreatedAtUtc)
+                .ToList();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Go(Guid id) => Nav.NavigateTo($"/needs/{id}");
+}

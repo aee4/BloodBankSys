@@ -1,0 +1,238 @@
+@page "/facility"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.ComponentModel.DataAnnotations
+@inject IFacilityService Facilities
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Facility Profile | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Facility Profile</h1>
+        <p class="bl-dash-subtitle">Your facility details</p>
+    </div>
+    @if (!_editing)
+    {
+        <button class="bl-btn bl-btn-outline" type="button" @onclick="Edit">
+            <AppIcon Name="settings" Size="14" /> Edit Details
+        </button>
+    }
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading facility..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can view facility details.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load the facility">
+        <span>We couldn't load your facility details right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_facility is null)
+{
+    <AlertMessage Variant="danger" Title="Facility not found">
+        <span>Your facility record could not be found. Contact BloodLink support.</span>
+    </AlertMessage>
+}
+else if (_editing)
+{
+    <section class="bl-card bl-card-pad">
+        <EditForm FormName="facility-profile" Model="_edit" OnValidSubmit="SaveAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="bl-form-grid">
+                <div class="bl-field">
+                    <label class="bl-label" for="fac-address">Street address <span>*</span></label>
+                    <InputText id="fac-address" class="bl-input" @bind-Value="_edit.Address" placeholder="e.g. 12 Health Street" />
+                    <ValidationMessage For="() => _edit.Address" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="fac-email">Contact email <span>*</span></label>
+                    <InputText id="fac-email" class="bl-input" type="email" @bind-Value="_edit.ContactEmail" placeholder="e.g. contact@hospital.org" />
+                    <ValidationMessage For="() => _edit.ContactEmail" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="fac-phone">Contact phone <span>*</span></label>
+                    <InputText id="fac-phone" class="bl-input" @bind-Value="_edit.ContactPhone" placeholder="e.g. +1 555 123 4567" />
+                    <ValidationMessage For="() => _edit.ContactPhone" />
+                </div>
+            </div>
+
+            @if (_busy)
+            {
+                <LoadingState Message="Saving..." />
+            }
+            @if (_actionError is { Length: > 0 })
+            {
+                <AlertMessage Variant="danger" Title="Couldn't save changes">
+                    <span>@_actionError</span>
+                </AlertMessage>
+            }
+
+            <div class="bl-form-actions">
+                <button class="bl-btn bl-btn-outline" type="button" @onclick="Cancel">Cancel</button>
+                <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
+                    <AppIcon Name="check" Size="14" /> Save Changes
+                </button>
+            </div>
+        </EditForm>
+    </section>
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-fac-banner">
+            <span class="bl-fac-avatar">@(_facility.Name.Length > 0 ? _facility.Name[0].ToString().ToUpperInvariant() : "F")</span>
+            <div>
+                <h2 class="bl-fac-name">@_facility.Name</h2>
+                <div class="bl-fac-meta">
+                    <span class="bl-fac-chip">@BloodDisplay.FacilityTypeLabel(_facility.FacilityType)</span>
+                    <span class="bl-status-badge bl-status-@BloodDisplay.FacilityStatusTone(_facility.Status)">
+                        @BloodDisplay.FacilityStatusLabel(_facility.Status)
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="bl-fac-body">
+            <div class="bl-detail-grid">
+                <div>
+                    <p class="bl-label-optional">Registration Number</p>
+                    <p class="bl-strong bl-mono">@_facility.RegistrationNumber</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">Region</p>
+                    <p class="bl-strong">@_facility.Region</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">City</p>
+                    <p class="bl-strong">@_facility.City</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">Facility ID</p>
+                    <p class="bl-mono bl-muted">@BloodDisplay.ShortId(_facility.Id)</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    @if (_saved is { Length: > 0 })
+    {
+        <AlertMessage Variant="success" Title="Done">
+            <span>@_saved</span>
+        </AlertMessage>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private FacilityDto? _facility;
+    private bool _editing;
+    private EditModel _edit = new();
+    private bool _busy;
+    private string? _actionError;
+    private string? _saved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        if (CurrentUser.FacilityId is not { } facilityId)
+        {
+            _loading = false;
+            _error = "load";
+            return;
+        }
+
+        try
+        {
+            _facility = await Facilities.GetFacilityAsync(facilityId);
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Edit()
+    {
+        if (_facility is null)
+        {
+            return;
+        }
+        _edit = new EditModel { Address = "", ContactEmail = "", ContactPhone = "" };
+        _editing = true;
+        _actionError = null;
+        _saved = null;
+    }
+
+    private void Cancel()
+    {
+        _editing = false;
+        _actionError = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            await Facilities.UpdateOwnFacilityAsync(new UpdateFacilityRequest(
+                _edit.Address,
+                _edit.ContactEmail,
+                _edit.ContactPhone));
+            _editing = false;
+            _facility = await Facilities.GetFacilityAsync(CurrentUser.FacilityId!.Value);
+            _saved = "Facility details updated.";
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _actionError = "You are not authorized to update facility details.";
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class EditModel
+    {
+        [Required(ErrorMessage = "Address is required")]
+        public string Address { get; set; } = "";
+
+        [Required(ErrorMessage = "Contact email is required")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address")]
+        public string ContactEmail { get; set; } = "";
+
+        [Required(ErrorMessage = "Contact phone is required")]
+        [Phone(ErrorMessage = "Enter a valid phone number")]
+        public string ContactPhone { get; set; } = "";
+    }
+}

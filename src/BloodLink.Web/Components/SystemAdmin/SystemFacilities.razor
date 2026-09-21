@@ -1,0 +1,107 @@
+@page "/system/facilities"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFacilityService Facilities
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>Facilities | BloodLink | System</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Facility Approvals</h1>
+        <p class="bl-dash-subtitle">Facilities waiting to join the BloodLink network</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading facilities..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only system administrators can review facility registrations.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load facilities">
+        <span>We couldn't load the facility list right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_facilities.Count == 0)
+{
+    <EmptyState Icon="building" Title="No facilities pending review"
+                Description="When facilities register, they'll appear here for approval." />
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-table-wrap">
+            <table class="bl-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Reg. Number</th>
+                        <th>Region</th>
+                        <th>City</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var facility in _facilities)
+                    {
+                        <tr class="bl-tr-click" @onclick="() => Go(facility.Id)">
+                            <td class="bl-strong">@facility.Name</td>
+                            <td class="bl-muted">@BloodDisplay.FacilityTypeLabel(facility.FacilityType)</td>
+                            <td class="bl-mono bl-muted">@facility.RegistrationNumber</td>
+                            <td class="bl-muted">@facility.Region</td>
+                            <td class="bl-muted">@facility.City</td>
+                            <td class="bl-right">
+                                <span class="bl-btn-sm bl-inline-link">Review</span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<FacilityDto> _facilities = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.SystemAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _facilities = await Facilities.ListPendingAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Go(Guid id) => Nav.NavigateTo($"/system/facilities/{id}");
+}

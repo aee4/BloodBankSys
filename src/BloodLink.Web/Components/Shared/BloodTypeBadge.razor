@@ -1,0 +1,20 @@
+<span class="bl-blood-badge @(IsNegative ? "bl-blood-neg" : "bl-blood-pos")">@Display</span>
+
+@code {
+    [Parameter, EditorRequired] public BloodType Value { get; set; }
+
+    private bool IsNegative => Value.ToString().EndsWith("Negative", StringComparison.Ordinal);
+
+    private string Display => Value switch
+    {
+        BloodType.APositive => "A+",
+        BloodType.ANegative => "A-",
+        BloodType.BPositive => "B+",
+        BloodType.BNegative => "B-",
+        BloodType.ABPositive => "AB+",
+        BloodType.ABNegative => "AB-",
+        BloodType.OPositive => "O+",
+        BloodType.ONegative => "O-",
+        _ => Value.ToString()
+    };
+}

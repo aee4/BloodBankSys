@@ -1,0 +1,114 @@
+@inject IDashboardService Dashboard
+@inject IFacilityService Facilities
+
+@if (_loading)
+{
+    <LoadingState Message="Loading platform overview..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Your account does not have system administration access.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load the dashboard">
+        <span>We couldn't load the platform overview right now. Please try again later.</span>
+    </AlertMessage>
+}
+else
+{
+    <div class="bl-dash-header">
+        <div>
+            <h1 class="bl-dash-title">System Dashboard</h1>
+            <p class="bl-dash-subtitle">BloodLink Network — Platform Overview</p>
+        </div>
+    </div>
+
+    <div class="bl-stat-grid bl-stat-grid-4">
+        <StatCard Label="Total Facilities" Value="@_totalFacilities.ToString()" Icon="building"
+                  Sub="@($"{_approved} approved · {_suspended} suspended")" />
+        <StatCard Label="Pending Approvals" Value="@_pending.ToString()" Icon="clock" Accent="@(_pending > 0)" />
+        <StatCard Label="Approved Facilities" Value="@_approved.ToString()" Icon="circle-check" />
+        <StatCard Label="Suspended Facilities" Value="@_suspended.ToString()" Icon="trending-down" Accent="@(_suspended > 0)" />
+    </div>
+
+    <div class="bl-card-grid bl-card-grid-2">
+        <section class="bl-card">
+            <div class="bl-card-head">
+                <h2>Facilities Awaiting Approval</h2>
+                <a class="bl-link" href="/system/facilities">View all <AppIcon Name="chevron-right" Size="12" /></a>
+            </div>
+            @if (_pendingFacilities.Count == 0)
+            {
+                <EmptyState Icon="circle-check" Title="All caught up"
+                            Description="No facilities are awaiting approval right now." />
+            }
+            else
+            {
+                <div class="bl-list">
+                    @foreach (var facility in _pendingFacilities)
+                    {
+                        <div class="bl-dash-row">
+                            <span class="bl-dash-facility-type"><AppIcon Name="building" Size="15" /></span>
+                            <div class="bl-dash-row-main">
+                                <strong>@facility.Name</strong>
+                                <span>@facility.City · @facility.RegistrationNumber</span>
+                            </div>
+                            <div class="bl-badge-row">
+                                <span class="bl-status-badge bl-status-warning">Pending</span>
+                                <a class="bl-link" href="/system/facilities/@facility.Id">
+                                    Review <AppIcon Name="chevron-right" Size="12" />
+                                </a>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="bl-card">
+            <div class="bl-card-head">
+                <h2>Recent Audit Events</h2>
+                <span class="bl-link is-disabled" title="Audit Log is coming soon">View all <AppIcon Name="chevron-right" Size="12" /></span>
+            </div>
+            <EmptyState Icon="history" Title="Audit log not ready"
+                        Description="Verified system actions will appear here once the audit log feed is connected." />
+        </section>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private int _pending;
+    private int _approved;
+    private int _suspended;
+    private int _totalFacilities;
+    private IReadOnlyList<FacilityDto> _pendingFacilities = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var stats = await Dashboard.GetSystemAdminDashboardAsync();
+            _pending = stats.PendingFacilities;
+            _approved = stats.ApprovedFacilities;
+            _suspended = stats.SuspendedFacilities;
+            _totalFacilities = _pending + _approved + _suspended;
+            _pendingFacilities = (await Facilities.ListPendingAsync())
+                .Take(4)
+                .ToList();
+            _loading = false;
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+    }
+}

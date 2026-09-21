@@ -1,0 +1,130 @@
+@page "/notifications"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject INotificationService NotificationService
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Notifications | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Notifications</h1>
+        <p class="bl-dash-subtitle">Updates from your facility and the BloodLink network</p>
+    </div>
+    @if (_anyUnread)
+    {
+        <button class="bl-btn bl-btn-outline" type="button" @onclick="MarkAllReadAsync">
+            <AppIcon Name="check" Size="14" /> Mark all as read
+        </button>
+    }
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading notifications..." />
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load notifications">
+        <span>We couldn't load your notifications right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_notifications.Count == 0)
+{
+    <EmptyState Icon="bell" Title="No notifications" Description="Updates about needs, requests and your facility will appear here." />
+}
+else
+{
+    <section class="bl-card">
+        <ul class="bl-note-list">
+            @foreach (var item in _notifications)
+            {
+                <li class="bl-note-item @(item.IsRead ? "bl-note-read" : "bl-note-unread")" @onclick="() => MarkItemReadAsync(item)">
+                    <span class="bl-note-icon">@BloodDisplay.NotificationTypeIcon(item.NotificationType)</span>
+                    <div class="bl-note-body">
+                        <div class="bl-note-head">
+                            <span class="bl-note-type">@BloodDisplay.NotificationTypeLabel(item.NotificationType)</span>
+                            <span class="bl-note-time">@BloodDisplay.FormatTimestamp(item.CreatedAtUtc)</span>
+                        </div>
+                        <p class="bl-note-title">@item.Title</p>
+                        @if (!string.IsNullOrWhiteSpace(item.Message))
+                        {
+                            <p class="bl-note-message">@item.Message</p>
+                        }
+                    </div>
+                    @if (!item.IsRead)
+                    {
+                        <span class="bl-note-dot" title="Unread"></span>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private IReadOnlyList<NotificationDto> _notifications = [];
+
+    private bool _anyUnread => _notifications.Any(item => !item.IsRead);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _notifications = await NotificationService.ListMineAsync();
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task MarkItemReadAsync(NotificationDto item)
+    {
+        if (item.IsRead || _busy)
+        {
+            return;
+        }
+        _busy = true;
+        try
+        {
+            await NotificationService.MarkReadAsync(item.Id);
+            _notifications = (await NotificationService.ListMineAsync())
+                .Where(n => n.Id != item.Id)
+                .Prepend(item with { IsRead = true })
+                .ToList();
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        _busy = true;
+        try
+        {
+            await NotificationService.MarkAllReadAsync();
+            _notifications = await NotificationService.ListMineAsync();
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

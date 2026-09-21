@@ -1,0 +1,107 @@
+@page "/requests/sent"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IBloodRequestService Requests
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>Requests Sent | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Requests Sent</h1>
+        <p class="bl-dash-subtitle">Blood requests sent to other facilities</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading sent requests..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can manage blood requests.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load requests">
+        <span>We couldn't load your sent requests right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_requests.Count == 0)
+{
+    <EmptyState Icon="send" Title="No requests sent yet"
+                Description="Once you request blood from another facility, your sent requests will appear here." />
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-table-wrap">
+            <table class="bl-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>To Facility</th>
+                        <th>Blood Type</th>
+                        <th>Units</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var request in _requests)
+                    {
+                        <tr class="bl-tr-click" @onclick="() => Go(request.Id)">
+                            <td class="bl-mono">@BloodDisplay.ShortId(request.Id)</td>
+                            <td class="bl-strong">Facility @BloodDisplay.ShortId(request.SourceFacilityId)</td>
+                            <td><BloodTypeBadge Value="request.BloodType" /></td>
+                            <td class="bl-strong">@request.UnitsRequested</td>
+                            <td>
+                                <span class="bl-status-badge bl-status-@BloodDisplay.BloodRequestStatusTone(request.Status)">
+                                    @BloodDisplay.BloodRequestStatusLabel(request.Status)
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private IReadOnlyList<BloodRequestDto> _requests = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _requests = await Requests.ListSentAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Go(Guid id) => Nav.NavigateTo($"/requests/{id}");
+}

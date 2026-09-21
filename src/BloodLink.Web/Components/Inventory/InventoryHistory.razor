@@ -1,0 +1,113 @@
+@page "/inventory/history"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IInventoryService Inventory
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Inventory History | BloodLink</PageTitle>
+
+<div class="bl-breadcrumb">
+    <a href="/inventory">Inventory</a>
+    <AppIcon Name="chevron-right" Size="12" />
+    <span>History</span>
+</div>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">Inventory History</h1>
+        <p class="bl-dash-subtitle">Immutable transaction log — all adjustments</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading transaction history..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Your account is not active for operational access. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load history">
+        <span>We couldn't load transaction history right now. Please try again later.</span>
+    </AlertMessage>
+}
+else if (_transactions.Count == 0)
+{
+    <EmptyState Icon="history" Title="No transactions yet"
+                Description="Stock adjustments will be logged here as an immutable record.">
+        @if (_isAdmin)
+        {
+            <a class="bl-btn bl-btn-primary" href="/inventory/adjust">
+                <AppIcon Name="upload" Size="14" /> Record an Adjustment
+            </a>
+        }
+    </EmptyState>
+}
+else
+{
+    <section class="bl-card">
+        <div class="bl-table-wrap">
+            <table class="bl-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Blood Type</th>
+                        <th>Total Change</th>
+                        <th>Reserved Change</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var transaction in _transactions)
+                    {
+                        var totalChange = transaction.TotalUnitsChange;
+                        <tr>
+                            <td class="bl-mono">@BloodDisplay.ShortId(transaction.Id)</td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(transaction.CreatedAtUtc)</td>
+                            <td class="bl-strong">@BloodDisplay.TransactionTypeLabel(transaction.TransactionType)</td>
+                            <td><BloodTypeBadge Value="transaction.BloodType" /></td>
+                            <td class="@(totalChange > 0 ? "bl-positive" : totalChange < 0 ? "bl-negative" : "bl-muted")">
+                                @(totalChange > 0 ? "+" : "")@totalChange
+                            </td>
+                            <td class="bl-muted">@transaction.ReservedUnitsChange</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private bool _isAdmin;
+    private IReadOnlyList<InventoryTransactionDto> _transactions = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _isAdmin = CurrentUser.IsInRole(RoleNames.FacilityAdmin);
+            _transactions = await Inventory.GetTransactionHistoryAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

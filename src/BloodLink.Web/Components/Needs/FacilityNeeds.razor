@@ -1,0 +1,135 @@
+@page "/needs"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IBloodNeedService Needs
+@inject ICurrentUserService CurrentUser
+@inject NavigationManager Nav
+
+<PageTitle>All Needs | BloodLink</PageTitle>
+
+<div class="bl-dash-header">
+    <div>
+        <h1 class="bl-dash-title">All Needs</h1>
+        <p class="bl-dash-subtitle">Blood needs across your facility</p>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading needs..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can view all facility needs. <a class="bl-inline-link" href="/needs/mine">View my needs</a>.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load needs">
+        <span>We couldn't load facility needs right now. Please try again later.</span>
+    </AlertMessage>
+}
+else
+{
+    <div class="bl-filter-tabs" role="tablist">
+        @foreach (var filter in Filters)
+        {
+            <button type="button"
+                    class="bl-filter-btn @(_filter == filter ? "is-active" : "")"
+                    @onclick="() => _filter = filter">
+                @filter
+                @if (filter != "All")
+                {
+                    <span class="bl-filter-count">@_needs.Count(n => BloodDisplay.BloodNeedStatusLabel(n.Status) == filter)</span>
+                }
+            </button>
+        }
+    </div>
+
+    @if (Filtered.Count() == 0)
+    {
+        <EmptyState Icon="clipboard-list" Title="No needs"
+                    Description="@(_filter == "All" ? "Staff submissions will appear here for review." : $"No needs match the '{_filter}' status.")" />
+    }
+    else
+    {
+        <section class="bl-card">
+            <div class="bl-table-wrap">
+                <table class="bl-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Blood Type</th>
+                            <th>Units</th>
+                            <th>Urgency</th>
+                            <th>Status</th>
+                            <th>Submitted</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var need in Filtered)
+                        {
+                            <tr class="bl-tr-click" @onclick="() => Go(need.Id)">
+                                <td class="bl-mono">@BloodDisplay.ShortId(need.Id)</td>
+                                <td><BloodTypeBadge Value="need.BloodType" /></td>
+                                <td class="bl-strong">@need.UnitsNeeded</td>
+                                <td><span class="bl-status-badge bl-status-@BloodDisplay.UrgencyTone(need.Urgency)">@BloodDisplay.UrgencyLabel(need.Urgency)</span></td>
+                                <td><span class="bl-status-badge bl-status-@BloodDisplay.BloodNeedStatusTone(need.Status)">@BloodDisplay.BloodNeedStatusLabel(need.Status)</span></td>
+                                <td class="bl-muted">@BloodDisplay.FormatTimestamp(need.CreatedAtUtc)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string _filter = "All";
+    private IReadOnlyList<BloodNeedDto> _needs = [];
+
+    private static readonly string[] Filters =
+    [
+        "All", "Pending Review", "Searching", "Fulfilled Internally", "Fulfilled Externally", "Rejected", "Cancelled"
+    ];
+
+    private IEnumerable<BloodNeedDto> Filtered =>
+        _filter == "All"
+            ? _needs.OrderByDescending(need => need.CreatedAtUtc)
+            : _needs.Where(need => BloodDisplay.BloodNeedStatusLabel(need.Status) == _filter)
+                .OrderByDescending(need => need.CreatedAtUtc);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _needs = await Needs.ListOwnFacilityAsync();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Go(Guid id) => Nav.NavigateTo($"/needs/{id}");
+}

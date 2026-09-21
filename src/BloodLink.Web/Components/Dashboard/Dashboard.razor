@@ -1,0 +1,34 @@
+@page "/dashboard"
+@layout DashboardLayout
+@attribute [Authorize]
+@inject AuthenticationStateProvider Authentication
+
+<PageTitle>Dashboard | BloodLink</PageTitle>
+
+@switch (Role)
+{
+    case RoleNames.FacilityAdmin:
+        <AdminDashboardView />
+        break;
+    case RoleNames.FacilityStaff:
+        <StaffDashboardView />
+        break;
+    case RoleNames.SystemAdmin:
+        <SystemDashboardView />
+        break;
+    default:
+        <AlertMessage Variant="danger" Title="Dashboard unavailable">
+            <span>You do not have access to a dashboard for your account.</span>
+        </AlertMessage>
+        break;
+}
+
+@code {
+    private string? Role { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        Role = principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    }
+}

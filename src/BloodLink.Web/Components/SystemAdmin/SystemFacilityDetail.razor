@@ -1,0 +1,272 @@
+@page "/system/facilities/{Id:guid}"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IFacilityService Facilities
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Facility Review | BloodLink | System</PageTitle>
+
+@if (_loading)
+{
+    <LoadingState Message="Loading facility..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only system administrators can review facility registrations.</span>
+    </AlertMessage>
+}
+else if (_error == "not-found")
+{
+    <EmptyState Icon="search" Title="Facility not found"
+                Description="This facility may have been removed.">
+        <a class="bl-btn bl-btn-outline" href="/system/facilities">Back to Facilities</a>
+    </EmptyState>
+}
+else if (_facility is null)
+{
+    <AlertMessage Variant="danger" Title="Couldn't load facility">
+        <span>We couldn't load the facility details right now. Please try again later.</span>
+    </AlertMessage>
+}
+else
+{
+    <nav class="bl-breadcrumb">
+        <a href="/system/facilities">Facility Approvals</a>
+        <AppIcon Name="chevron-right" Size="12" />
+        <span>@_facility.Name</span>
+    </nav>
+
+    <section class="bl-card bl-card-pad">
+        <div class="bl-detail-header">
+            <div>
+                <h1 class="bl-dash-title">@_facility.Name</h1>
+                <p class="bl-dash-subtitle">@BloodDisplay.FacilityTypeLabel(_facility.FacilityType)</p>
+            </div>
+            <span class="bl-status-badge bl-status-@BloodDisplay.FacilityStatusTone(_facility.Status)">
+                @BloodDisplay.FacilityStatusLabel(_facility.Status)
+            </span>
+        </div>
+
+        <div class="bl-detail-grid">
+            <div>
+                <p class="bl-label-optional">Registration Number</p>
+                <p class="bl-strong bl-mono">@_facility.RegistrationNumber</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">Region</p>
+                <p class="bl-strong">@_facility.Region</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">City</p>
+                <p class="bl-strong">@_facility.City</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">Facility ID</p>
+                <p class="bl-mono bl-muted">@BloodDisplay.ShortId(_facility.Id)</p>
+            </div>
+        </div>
+
+        @if (_canApprove || _canReject || _canSuspend || _canRestore)
+        {
+            <div class="bl-action-row bl-action-row-top">
+                @if (_canApprove)
+                {
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("approve")'>
+                        <AppIcon Name="check" Size="14" /> Approve
+                    </button>
+                }
+                @if (_canReject)
+                {
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => Begin("reject")'>
+                        <AppIcon Name="x" Size="14" /> Reject
+                    </button>
+                }
+                @if (_canSuspend)
+                {
+                    <button class="bl-btn bl-btn-sm" type="button" @onclick='() => Begin("suspend")'>
+                        <AppIcon Name="x-circle" Size="14" /> Suspend
+                    </button>
+                }
+                @if (_canRestore)
+                {
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("restore")'>
+                        <AppIcon Name="check" Size="14" /> Restore
+                    </button>
+                }
+            </div>
+        }
+    </section>
+
+    @if (_saved is { Length: > 0 })
+    {
+        <AlertMessage Variant="success" Title="Done">
+            <span>@_saved</span>
+        </AlertMessage>
+    }
+}
+
+@if (_confirming is not null && _facility is not null)
+{
+    <div class="bl-modal-backdrop">
+        <div class="bl-modal">
+            <h3 class="bl-card-title">
+                @(_confirming switch
+                {
+                    "approve" => "Approve " + _facility.Name,
+                    "reject" => "Reject " + _facility.Name,
+                    "suspend" => "Suspend " + _facility.Name,
+                    _ => "Restore " + _facility.Name
+                })
+            </h3>
+            <p class="bl-card-desc">
+                @(_confirming switch
+                {
+                    "approve" => "The facility will gain access to BloodLink.",
+                    "reject" => "The facility will be notified of the rejection.",
+                    "suspend" => "The facility will lose access until restored.",
+                    _ => "The facility's access will be restored."
+                })
+            </p>
+            @if (_confirming is "reject" or "suspend")
+            {
+                <label class="bl-label" for="fac-reason">Reason <span>*</span></label>
+                <InputTextArea id="fac-reason" class="bl-input" @bind-Value="_reason" rows="3" placeholder="Required — explain the decision" />
+            }
+            @if (_busy)
+            {
+                <LoadingState Message="Submitting..." />
+            }
+            @if (!string.IsNullOrEmpty(_actionError))
+            {
+                <AlertMessage Variant="danger" Title="Couldn't update facility">
+                    <span>@_actionError</span>
+                </AlertMessage>
+            }
+            <div class="bl-confirm-actions">
+                <button class="bl-btn bl-btn-outline" type="button" @onclick="ResetConfirm">Cancel</button>
+                <button class="bl-btn @(_confirming is "approve" or "restore" ? "bl-btn-primary" : "bl-btn-danger")" type="button"
+                        @onclick="ConfirmAsync"
+                        disabled='@(_busy || (_confirming is "reject" or "suspend" && string.IsNullOrWhiteSpace(_reason)))'>
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private bool _loading = true;
+    private string? _error;
+    private FacilityDto? _facility;
+    private string? _confirming;
+    private string? _reason;
+    private bool _busy;
+    private string? _actionError;
+    private string? _saved;
+
+    private bool _canApprove => _facility is { Status: FacilityStatus.Pending };
+    private bool _canReject => _facility is { Status: FacilityStatus.Pending };
+    private bool _canSuspend => _facility is { Status: FacilityStatus.Approved };
+    private bool _canRestore => _facility is { Status: FacilityStatus.Suspended };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentUser.IsInRole(RoleNames.SystemAdmin))
+        {
+            _loading = false;
+            _error = "no-access";
+            return;
+        }
+
+        try
+        {
+            _facility = await Facilities.GetFacilityAsync(Id);
+            if (_facility is null)
+            {
+                _error = "not-found";
+            }
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Begin(string action)
+    {
+        _confirming = action;
+        _reason = null;
+        _actionError = null;
+        _saved = null;
+    }
+
+    private void ResetConfirm()
+    {
+        _confirming = null;
+        _reason = null;
+        _actionError = null;
+    }
+
+    private async Task ConfirmAsync()
+    {
+        if (_facility is null || _confirming is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _actionError = null;
+        try
+        {
+            var decision = new FacilityDecisionRequest(_facility.Id, _reason);
+            switch (_confirming)
+            {
+                case "approve":
+                    await Facilities.ApproveAsync(decision);
+                    break;
+                case "reject":
+                    await Facilities.RejectAsync(decision);
+                    break;
+                case "suspend":
+                    await Facilities.SuspendAsync(decision);
+                    break;
+                case "restore":
+                    await Facilities.RestoreAsync(decision);
+                    break;
+            }
+            _facility = await Facilities.GetFacilityAsync(Id);
+            _saved = _confirming switch
+            {
+                "approve" => "Facility approved.",
+                "reject" => "Facility rejected.",
+                "suspend" => "Facility suspended.",
+                _ => "Facility restored."
+            };
+            ResetConfirm();
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _actionError = "You are not authorized to perform this action.";
+        }
+        catch (Exception ex)
+        {
+            _actionError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
