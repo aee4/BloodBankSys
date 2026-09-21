@@ -2,6 +2,7 @@ using BloodLink.Application.Contracts;
 using BloodLink.Application.Interfaces;
 using BloodLink.Application.Security;
 using BloodLink.Infrastructure.Data;
+using BloodLink.Infrastructure.Data.Seed;
 using BloodLink.Infrastructure.Identity;
 using BloodLink.Infrastructure.Services.Inventory;
 using BloodLink.Infrastructure.Services.Dashboard;
@@ -62,6 +63,7 @@ public static class DependencyInjection
         services.Configure<DataProtectionTokenProviderOptions>(options =>
             options.TokenLifespan = TimeSpan.FromHours(1));
         services.AddScoped<AccountAccessService>();
+        services.AddScoped<DatabaseInitializer>();
         services.AddSingleton<LoginFailureWork>();
         services.TryAddSingleton<IPasswordResetDelivery, DisabledPasswordResetDelivery>();
         services.AddAuthorization(ConfigureAuthorization);

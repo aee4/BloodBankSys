@@ -1,29 +1,44 @@
 # Database Guide
 
-## Ownership
+BloodLink uses SQL Server, EF Core migrations, and ASP.NET Core Identity. The canonical model is `BloodLinkDbContext`; generated migrations are the only supported schema-change mechanism. Do not apply ad hoc constraint scripts.
 
-Database Developer 1 owns `BloodLinkDbContext`, EF configurations, migrations, seed data, relationships, constraints, delete behavior, and database setup documentation.
+## Integrity Policy
 
-Database Developer 2 owns query review, concurrency tests, indexes, performance validation, and backup or reset guidance.
+- Operational foreign keys use `NO ACTION`; workflow records are not cascade-deleted.
+- `BloodInventory`, `BloodNeed`, and `BloodRequest` use SQL Server `rowversion` concurrency tokens.
+- Inventory counts cannot be negative, and reserved units cannot exceed total units.
+- Requests require positive requested units; accepted units, when supplied, are positive and no greater than requested units.
+- A request's source and requesting facilities must differ.
+- Facility name, facility registration number, `(FacilityId, BloodType)` inventory, and `FacilityStaff.UserId` are unique.
+- Enum values are stored as integers to preserve the established schema contract.
 
-## Migration Rules
+`Facility.CreatedByUserId` and `ApprovedByUserId` are bounded actor identifiers rather than foreign keys. Facility onboarding creates the facility and first administrator together, so a reverse facility-to-user FK would introduce a circular insert dependency. Operational user references are foreign keys.
 
-- Do not create migrations until the shared entity model is approved.
-- Only Database Developer 1 commits migration files.
-- Feature owners request schema changes through reviewed pull requests.
-- Migrations must not include donor tables, donor columns, donor seed data, or patient-identifying information.
+## Migrations
 
-## Entity Rules
+```powershell
+dotnet ef migrations list --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
+dotnet ef database update --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
+```
 
-- Facilities, users, needs, requests, transactions, histories, and audit logs are not hard-deleted through application workflows.
-- `BloodInventory` must be unique by FacilityId and BloodType.
-- `AvailableUnits` is computed as TotalUnits minus ReservedUnits.
-- Inventory transaction rows are immutable.
-- RowVersion fields protect inventory, needs, and requests from stale updates.
+`20260921230224_EnforceCanonicalDatabaseIntegrity` is additive: it adds bounds, indexes, foreign keys, and checks without deleting data. It deliberately fails before changing the schema if existing rows violate key invariants or new uniqueness rules. Correct the reported data through an approved operational process and rerun; never modify the migration to discard records.
 
-## Seed Data Rules
+Apply migrations as an explicit deployment step. Application startup does not call `Migrate` or `EnsureCreated`.
 
-- Seed roles: SystemAdmin, FacilityAdmin, FacilityStaff.
-- Seed all eight blood types for approved demo facilities only when demo data is explicitly requested.
-- Use safe fake demo data only.
-- Do not seed credentials, tokens, or real people.
+## Initialization
+
+Initialization is opt-in. With `BloodLink__DatabaseInitialization__Enabled=true`, startup idempotently ensures these roles exist: `SystemAdmin`, `FacilityAdmin`, and `FacilityStaff`.
+
+The first SystemAdmin is also opt-in and requires all settings:
+
+```text
+BloodLink__BootstrapAdmin__Enabled=true
+BloodLink__BootstrapAdmin__Email=admin@example.org
+BloodLink__BootstrapAdmin__Password=<secret from a secret store>
+BloodLink__BootstrapAdmin__FirstName=System
+BloodLink__BootstrapAdmin__LastName=Administrator
+```
+
+The account is facility-less and receives only `SystemAdmin`. Known placeholder passwords are rejected. An existing account is never silently elevated. Disable both initialization switches after successful provisioning, and never commit credentials to configuration or documentation.
+
+See [database setup](database/setup.md), [ERD](database/erd.md), and [data dictionary](database/data-dictionary.md).

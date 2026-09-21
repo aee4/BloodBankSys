@@ -1,6 +1,7 @@
 using BloodLink.Web.Components;
 using BloodLink.Infrastructure;
 using BloodLink.Web.Authorization;
+using BloodLink.Infrastructure.Data.Seed;
 using Microsoft.AspNetCore.Components.Authorization;
 using System.Threading.RateLimiting;
 
@@ -31,6 +32,13 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+
+if (builder.Configuration.GetValue<bool>("BloodLink:DatabaseInitialization:Enabled"))
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync();
+}
+
 app.UseMiddleware<SecurityHeadersMiddleware>();
 
 // Configure the HTTP request pipeline.

@@ -31,7 +31,8 @@ WHERE TotalUnits < 0
 
 -- ----------------------------------------------------------------------------
 -- 2. BLOOD REQUEST CONSISTENCY AUDIT
--- (Rule: UnitsRequested > 0, UnitsAccepted <= UnitsRequested)
+-- (Rule: UnitsRequested > 0; accepted is null or positive and <= requested;
+--        requesting and source facilities differ)
 -- ----------------------------------------------------------------------------
 SELECT 
     Id,
@@ -44,14 +45,28 @@ SELECT
     Status,
     CASE 
         WHEN UnitsRequested <= 0 THEN 'UnitsRequested must be positive'
-        WHEN UnitsAccepted < 0 THEN 'UnitsAccepted cannot be negative'
+        WHEN UnitsAccepted <= 0 THEN 'UnitsAccepted must be positive when supplied'
         WHEN UnitsAccepted > UnitsRequested THEN 'UnitsAccepted exceeds UnitsRequested'
+        WHEN RequestingFacilityId = SourceFacilityId THEN 'Facilities must differ'
         ELSE 'Valid'
     END AS RequestViolationReason
 FROM BloodRequests
 WHERE UnitsRequested <= 0
-   OR UnitsAccepted < 0
-   OR UnitsAccepted > UnitsRequested;
+   OR (UnitsAccepted IS NOT NULL AND (UnitsAccepted <= 0 OR UnitsAccepted > UnitsRequested))
+   OR RequestingFacilityId = SourceFacilityId;
+
+-- ----------------------------------------------------------------------------
+-- 2B. UNIQUENESS PREFLIGHT
+-- Expected result: 0 rows from each query.
+-- ----------------------------------------------------------------------------
+SELECT Name, COUNT(*) AS DuplicateCount
+FROM Facilities GROUP BY Name HAVING COUNT(*) > 1;
+
+SELECT RegistrationNumber, COUNT(*) AS DuplicateCount
+FROM Facilities GROUP BY RegistrationNumber HAVING COUNT(*) > 1;
+
+SELECT UserId, COUNT(*) AS DuplicateCount
+FROM FacilityStaff GROUP BY UserId HAVING COUNT(*) > 1;
 
 -- ----------------------------------------------------------------------------
 -- 3. INVENTORY TRANSACTION MATHEMATICAL RECONCILIATION
