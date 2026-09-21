@@ -1,0 +1,145 @@
+@inject AuthenticationStateProvider Authentication
+
+<aside class="bl-sidebar" aria-label="Main navigation">
+    <div class="bl-sidebar-brand">
+        <span class="bl-sidebar-logo"><AppIcon Name="droplet" Size="15" Filled="true" /></span>
+        <div class="bl-sidebar-brand-text">
+            <strong>BloodLink</strong>
+            @if (!string.IsNullOrWhiteSpace(FacilityName))
+            {
+                <span class="bl-sidebar-facility">@FacilityName</span>
+            }
+        </div>
+    </div>
+
+    <nav class="bl-sidebar-nav">
+        @foreach (var item in NavItems)
+        {
+            @if (item.Route is { Length: > 0 } route)
+            {
+                <NavLink class="bl-nav-item" href="@route" Match="NavLinkMatch.Prefix">
+                    <AppIcon Name="@item.Icon" Size="16" />
+                    <span>@item.Label</span>
+                </NavLink>
+            }
+            else
+            {
+                <span class="bl-nav-item is-disabled" title="@($"Planned: {item.Label}")" aria-disabled="true">
+                    <AppIcon Name="@item.Icon" Size="16" />
+                    <span>@item.Label</span>
+                    <span class="bl-nav-soon">Soon</span>
+                </span>
+            }
+
+            @if (item.Children is { Length: > 0 })
+            {
+                <div class="bl-nav-sub">
+                    @foreach (var child in item.Children)
+                    {
+                        @if (child.Route is { Length: > 0 } childRoute)
+                        {
+                            <NavLink class="bl-nav-item bl-nav-child" href="@childRoute" Match="NavLinkMatch.All">
+                                <AppIcon Name="@child.Icon" Size="14" />
+                                <span>@child.Label</span>
+                            </NavLink>
+                        }
+                        else
+                        {
+                            <span class="bl-nav-item bl-nav-child is-disabled" title="@($"Planned: {child.Label}")" aria-disabled="true">
+                                <AppIcon Name="@child.Icon" Size="14" />
+                                <span>@child.Label</span>
+                            </span>
+                        }
+                    }
+                </div>
+            }
+        }
+    </nav>
+
+    <div class="bl-sidebar-user">
+        <div class="bl-sidebar-user-row">
+            <span class="bl-sidebar-avatar">@Initials</span>
+            <div class="bl-sidebar-user-text">
+                <strong>@DisplayName</strong>
+                <span>@RoleLabel</span>
+            </div>
+        </div>
+        <form method="post" action="/account/logout" data-enhance="false">
+            <AntiforgeryToken />
+            <button type="submit" class="bl-nav-item bl-nav-signout">
+                <AppIcon Name="log-out" Size="13" />
+                <span>Sign Out</span>
+            </button>
+        </form>
+    </div>
+</aside>
+
+@code {
+    [Parameter] public string? Role { get; set; }
+    [Parameter] public string? FacilityName { get; set; }
+
+    private static readonly NavItem[] StaffNav =
+    [
+        new("Dashboard", "layout-dashboard", "/dashboard"),
+        new("Inventory", "package", "/inventory"),
+        new("Submit Need", "plus", "/needs/new"),
+        new("My Needs", "clipboard-list", "/needs/mine"),
+        new("Notifications", "bell", "/notifications")
+    ];
+
+    private static readonly NavItem[] AdminNav =
+    [
+        new("Dashboard", "layout-dashboard", "/dashboard"),
+        new("Inventory", "package", "/inventory",
+        [
+            new("Adjust", "upload", "/inventory/adjust"),
+            new("History", "history", "/inventory/history"),
+            new("Network Search", "search", "/inventory/search")
+        ]),
+        new("Needs", "clipboard-list", "/needs"),
+        new("Requests Sent", "send", "/requests/sent"),
+        new("Requests In", "inbox", "/requests/in"),
+        new("Staff", "users", "/staff"),
+        new("Facility", "building", "/facility"),
+        new("Notifications", "bell", "/notifications")
+    ];
+
+    private static readonly NavItem[] SystemNav =
+    [
+        new("Dashboard", "layout-dashboard", "/dashboard"),
+        new("Facilities", "building", "/system/facilities"),
+        new("Audit Log", "history", null),
+        new("Notifications", "bell", "/notifications")
+    ];
+
+    private IEnumerable<NavItem> NavItems => Role switch
+    {
+        BloodLink.Application.Contracts.RoleNames.FacilityAdmin => AdminNav,
+        BloodLink.Application.Contracts.RoleNames.SystemAdmin => SystemNav,
+        _ => StaffNav
+    };
+
+    private string RoleLabel => Role switch
+    {
+        BloodLink.Application.Contracts.RoleNames.FacilityAdmin => "Facility Admin",
+        BloodLink.Application.Contracts.RoleNames.SystemAdmin => "System Admin",
+        BloodLink.Application.Contracts.RoleNames.FacilityStaff => "Facility Staff",
+        _ => "Signed in"
+    };
+
+    private string Initials { get; set; } = "";
+
+    private string DisplayName { get; set; } = "Signed in";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        DisplayName = principal.Identity?.Name ?? "Signed in";
+        Initials = DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .Aggregate(string.Empty, (acc, part) => acc + part[..1])
+            .ToUpperInvariant();
+    }
+
+    private sealed record NavItem(string Label, string Icon, string? Route, NavItem[]? Children = null);
+}

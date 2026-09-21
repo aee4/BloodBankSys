@@ -1,0 +1,35 @@
+@inherits LayoutComponentBase
+@inject AuthenticationStateProvider Authentication
+@inject ICurrentUserService CurrentUser
+@inject IFacilityService Facilities
+
+<div class="bl-app">
+    <DashboardSidebar Role="@_role" FacilityName="@_facilityName" />
+
+    <main class="bl-app-main">
+        <div class="bl-app-content">
+            @Body
+        </div>
+    </main>
+</div>
+
+@code {
+    private string? _role;
+    private string? _facilityName;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var principal = (await Authentication.GetAuthenticationStateAsync()).User;
+        _role = principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+
+        if (CurrentUser.FacilityId is { } facilityId && CurrentUser.IsActive)
+        {
+            var facility = await Facilities.GetFacilityAsync(facilityId);
+            _facilityName = facility?.Name;
+        }
+        else
+        {
+            _facilityName = null;
+        }
+    }
+}

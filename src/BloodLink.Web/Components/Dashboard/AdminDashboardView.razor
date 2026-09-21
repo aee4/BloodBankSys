@@ -1,0 +1,213 @@
+@inject IDashboardService Dashboard
+@inject IBloodNeedService Needs
+@inject IInventoryService Inventory
+@inject IStaffService Staff
+@inject IFacilityService Facilities
+@inject ICurrentUserService CurrentUser
+
+@if (_loading)
+{
+    <LoadingState Message="Loading your dashboard..." />
+}
+else if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Your account or facility is not active for operational access.</span>
+    </AlertMessage>
+}
+else if (_error == "load")
+{
+    <AlertMessage Variant="danger" Title="Couldn't load your dashboard">
+        <span>We couldn't load your dashboard right now. Please try again later.</span>
+    </AlertMessage>
+}
+else
+{
+    <div class="bl-dash-header">
+        <div>
+            <h1 class="bl-dash-title">Dashboard</h1>
+            @if (!string.IsNullOrWhiteSpace(_subtitle))
+            {
+                <p class="bl-dash-subtitle">@_subtitle</p>
+            }
+        </div>
+    </div>
+
+    <div class="bl-stat-grid bl-stat-grid-4">
+        <StatCard Label="Low-Stock Alerts" Value="@_lowStockItems.ToString()" Icon="alert-triangle" Accent="@(_lowStockItems > 0)" />
+        <StatCard Label="Pending Needs" Value="@_openNeeds.ToString()" Icon="clipboard-list" Sub="Awaiting review" />
+        <StatCard Label="Active Requests" Value="@_activeRequests.ToString()" Icon="activity"
+                  Sub="@($"{_sentRequests} sent · {_receivedRequests} received")" />
+        <StatCard Label="Staff Members" Value="@_staffCount.ToString()" Icon="users"
+                  Sub="@(_activeStaff == _staffCount ? $"{_staffCount} active" : $"{_activeStaff} active of {_staffCount}")" />
+    </div>
+
+    <section class="bl-card bl-card-inline">
+        <div class="bl-card-head">
+            <h2>Inventory at a Glance</h2>
+            <span class="bl-link is-disabled" title="Inventory is coming soon">Manage <AppIcon Name="chevron-right" Size="12" /></span>
+        </div>
+        <div class="bl-glance-grid">
+            @foreach (var (value, label) in BloodTypes)
+            {
+                var item = _inventory.FirstOrDefault(i => i.BloodType == value);
+                var available = item?.AvailableUnits ?? 0;
+                var low = item is not null && available <= item.LowStockThreshold;
+                <div class="bl-glance-chip @(low ? "bl-glance-low" : "")">
+                    <span class="bl-glance-type">@label</span>
+                    <span class="bl-glance-value">@available</span>
+                    <span class="bl-glance-caption">avail.</span>
+                </div>
+            }
+        </div>
+    </section>
+
+    <div class="bl-card-grid bl-card-grid-2">
+        <section class="bl-card">
+            <div class="bl-card-head">
+                <h2>Recent Needs</h2>
+                <span class="bl-link is-disabled" title="Needs is coming soon">View all <AppIcon Name="chevron-right" Size="12" /></span>
+            </div>
+            @if (_recentNeeds.Count == 0)
+            {
+                <EmptyState Icon="clipboard-list" Title="No needs yet"
+                            Description="Needs submitted by your staff will appear here." />
+            }
+            else
+            {
+                <div class="bl-list">
+                    @foreach (var need in _recentNeeds)
+                    {
+                        <div class="bl-dash-row">
+                            <BloodTypeBadge Value="need.BloodType" />
+                            <div class="bl-dash-row-main">
+                                <strong>@need.UnitsNeeded units</strong>
+                                <span>@need.CreatedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                            </div>
+                            <div class="bl-badge-row">
+                                <span class="bl-status-badge bl-status-@UrgencyTone(need.Urgency)">@need.Urgency</span>
+                                <span class="bl-status-badge bl-status-@StatusTone(need.Status)">@StatusLabel(need.Status)</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="bl-card">
+            <div class="bl-card-head">
+                <h2>Quick Actions</h2>
+            </div>
+            <div class="bl-quick-grid">
+                @foreach (var (label, icon) in QuickActions)
+                {
+                    <button class="bl-quick-action" type="button" disabled title="@($"Coming soon: {label}")">
+                        <AppIcon Name="@icon" Size="16" />
+                        <span>@label</span>
+                    </button>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _error;
+    private string? _subtitle;
+    private int _lowStockItems;
+    private int _openNeeds;
+    private int _sentRequests;
+    private int _receivedRequests;
+    private int _staffCount;
+    private int _activeStaff;
+    private IReadOnlyList<InventoryItemDto> _inventory = [];
+    private IReadOnlyList<BloodNeedDto> _recentNeeds = [];
+
+    private int _activeRequests => _sentRequests + _receivedRequests;
+
+    private static readonly (string Label, string Icon)[] QuickActions =
+    [
+        ("Adjust Inventory", "upload"),
+        ("Search Network", "search"),
+        ("View Requests", "inbox"),
+        ("Manage Staff", "users")
+    ];
+
+    private static readonly (BloodType Value, string Label)[] BloodTypes =
+        Enum.GetValues<BloodType>().Select(value => (value, BloodTypeShortName(value))).ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (CurrentUser.FacilityId is { } facilityId)
+            {
+                var facility = await Facilities.GetFacilityAsync(facilityId);
+                _subtitle = facility is null ? null : $"{facility.Name} — Facility Admin";
+            }
+
+            var stats = await Dashboard.GetFacilityAdminDashboardAsync();
+            _lowStockItems = stats.LowStockItems;
+            _openNeeds = stats.OpenNeeds;
+            _sentRequests = stats.SentRequests;
+            _receivedRequests = stats.ReceivedRequests;
+
+            var staffMembers = await Staff.ListOwnFacilityStaffAsync();
+            _staffCount = staffMembers.Count;
+            _activeStaff = staffMembers.Count(s => s.Status == StaffStatus.Active);
+
+            _inventory = await Inventory.GetOwnInventoryAsync();
+            _recentNeeds = (await Needs.ListOwnFacilityAsync())
+                .OrderByDescending(n => n.CreatedAtUtc)
+                .Take(3)
+                .ToList();
+            _loading = false;
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+    }
+
+    private static string BloodTypeShortName(BloodType bloodType) => bloodType switch
+    {
+        BloodType.APositive => "A+",
+        BloodType.ANegative => "A-",
+        BloodType.BPositive => "B+",
+        BloodType.BNegative => "B-",
+        BloodType.ABPositive => "AB+",
+        BloodType.ABNegative => "AB-",
+        BloodType.OPositive => "O+",
+        BloodType.ONegative => "O-",
+        _ => bloodType.ToString()
+    };
+
+    private static string StatusLabel(BloodNeedStatus status) => status switch
+    {
+        BloodNeedStatus.PendingReview => "Pending Review",
+        BloodNeedStatus.FulfilledInternally => "Fulfilled Internally",
+        BloodNeedStatus.FulfilledExternally => "Fulfilled Externally",
+        _ => status.ToString()
+    };
+
+    private static string UrgencyTone(UrgencyLevel urgency) => urgency switch
+    {
+        UrgencyLevel.Emergency => "danger",
+        UrgencyLevel.Urgent => "warning",
+        _ => "neutral"
+    };
+
+    private static string StatusTone(BloodNeedStatus status) => status switch
+    {
+        BloodNeedStatus.PendingReview => "warning",
+        BloodNeedStatus.Searching => "neutral",
+        BloodNeedStatus.FulfilledInternally or BloodNeedStatus.FulfilledExternally => "success",
+        BloodNeedStatus.Rejected or BloodNeedStatus.Cancelled => "danger",
+        _ => "neutral"
+    };
+}

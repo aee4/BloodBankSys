@@ -1,0 +1,21 @@
+<div class="bl-stat-card @(Accent ? "bl-stat-accent" : "")">
+    <div class="bl-stat-body">
+        <p class="bl-stat-label">@Label</p>
+        <p class="bl-stat-value">@Value</p>
+        @if (!string.IsNullOrWhiteSpace(Sub))
+        {
+            <p class="bl-stat-sub">@Sub</p>
+        }
+    </div>
+    <span class="bl-stat-icon">
+        <AppIcon Name="@Icon" Size="19" />
+    </span>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Icon { get; set; } = string.Empty;
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public bool Accent { get; set; }
+}

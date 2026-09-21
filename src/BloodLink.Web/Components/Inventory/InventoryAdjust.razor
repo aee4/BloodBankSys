@@ -1,0 +1,209 @@
+@page "/inventory/adjust"
+@layout DashboardLayout
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IInventoryService Inventory
+@inject ICurrentUserService CurrentUser
+
+<PageTitle>Adjust Inventory | BloodLink</PageTitle>
+
+<div class="bl-breadcrumb">
+    <a href="/inventory">Inventory</a>
+    <AppIcon Name="chevron-right" Size="12" />
+    <span>Adjust</span>
+</div>
+
+@if (_error == "no-access")
+{
+    <AlertMessage Variant="danger" Title="No access">
+        <span>Only facility administrators can adjust inventory. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
+    </AlertMessage>
+}
+else
+{
+    <div class="bl-dash-header">
+        <div>
+            <h1 class="bl-dash-title">Adjust Inventory</h1>
+            <p class="bl-dash-subtitle">Record a stock change</p>
+        </div>
+    </div>
+
+    @if (_submitted)
+    {
+        <section class="bl-card bl-card-pad bl-success-card">
+            <span class="bl-success-icon"><AppIcon Name="circle-check" Size="32" /></span>
+            <h1>Adjustment Recorded</h1>
+            <p>Inventory updated and transaction logged to the immutable history.</p>
+            <div class="bl-form-actions">
+                <button class="bl-btn bl-btn-outline" type="button" @onclick="Reset">Another</button>
+                <a class="bl-btn bl-btn-primary" href="/inventory">Back to Inventory</a>
+            </div>
+        </section>
+    }
+    else
+    {
+        <div class="bl-page-main">
+            <section class="bl-card bl-card-pad">
+                <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="inventory-adjust" novalidate>
+                    @if (_error == "load")
+                    {
+                        <AlertMessage Variant="danger" Title="Adjustment not recorded">
+                            <span>We couldn't record the adjustment. Please try again later.</span>
+                        </AlertMessage>
+                    }
+                    @if (_error == "invalid")
+                    {
+                        <AlertMessage Variant="danger" Title="Check the form">
+                            <span>Please complete all required fields with valid values.</span>
+                        </AlertMessage>
+                    }
+                    @if (_error == "no-stock")
+                    {
+                        <AlertMessage Variant="danger" Title="Insufficient stock">
+                            <span>This adjustment would make available stock negative. Please check the current inventory.</span>
+                        </AlertMessage>
+                    }
+
+                    <div class="bl-form-grid">
+                        <div class="bl-field">
+                            <label class="bl-label" for="inv-blood-type">Blood Type <span>*</span></label>
+                            <InputSelect id="inv-blood-type" class="bl-input bl-select" @bind-Value="_model.BloodType" required>
+                                <option value="">Select blood type</option>
+                                @foreach (var type in BloodTypes)
+                                {
+                                    <option value="@type.Value">@type.Label</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="bl-field">
+                            <label class="bl-label" for="inv-units">Units <span>*</span></label>
+                            <InputNumber id="inv-units" class="bl-input" @bind-Value="_model.Units" placeholder="e.g. 10" required />
+                            <p class="bl-field-hint">@AdjustmentHint</p>
+                        </div>
+                    </div>
+
+                    <div class="bl-field bl-fieldset-gap">
+                        <label class="bl-label" id="inv-type-label">Adjustment Type <span>*</span></label>
+                        <div class="bl-toggle-group" role="radiogroup" aria-labelledby="inv-type-label">
+                            @foreach (var option in AdjustmentTypes)
+                            {
+                                <button type="button" class="bl-toggle-btn @(_model.AdjustmentType == option ? "is-active" : "")"
+                                        @onclick="() => _model.AdjustmentType = _model.AdjustmentType == option ? null : option">
+                                    @option
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="bl-field">
+                        <label class="bl-label" for="inv-reason">Reason <span>*</span></label>
+                        <InputTextArea id="inv-reason" class="bl-input bl-textarea" @bind-Value="_model.Reason" rows="3"
+                                       placeholder="Required — describe the reason for this adjustment" />
+                    </div>
+
+                    <div class="bl-form-actions">
+                        <a class="bl-btn bl-btn-outline" href="/inventory">Cancel</a>
+                        <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
+                            @if (_busy) { <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Recording...</span> }
+                            else { <span>Record Adjustment</span> }
+                        </button>
+                    </div>
+                </EditForm>
+            </section>
+        </div>
+    }
+}
+
+@code {
+    private readonly AdjustForm _model = new();
+    private bool _busy;
+    private bool _submitted;
+    private string? _error;
+    private bool _isAdmin;
+
+    private static readonly (BloodType Value, string Label)[] BloodTypes =
+        Enum.GetValues<BloodType>().Select(value => (value, BloodDisplay.BloodTypeLabel(value))).ToArray();
+
+    private static readonly string[] AdjustmentTypes = ["Stock In", "Consumption", "Manual Adjustment"];
+
+    private string AdjustmentHint => _model.AdjustmentType switch
+    {
+        "Stock In" => "Units added to stock (positive).",
+        "Consumption" => "Units removed from stock (consumed).",
+        "Manual Adjustment" => "Enter a signed value — positive to add, negative to remove.",
+        _ => string.Empty
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isAdmin = CurrentUser.IsInRole(RoleNames.FacilityAdmin);
+        if (!_isAdmin) _error = "no-access";
+    }
+
+    private void Reset()
+    {
+        _model.BloodType = null;
+        _model.Units = null;
+        _model.AdjustmentType = null;
+        _model.Reason = string.Empty;
+        _submitted = false;
+        _error = null;
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (!_isAdmin)
+        {
+            _error = "no-access";
+            return;
+        }
+        if (_model.BloodType is not { } bloodType || _model.Units is not { } units || units == 0 ||
+            string.IsNullOrWhiteSpace(_model.AdjustmentType) || string.IsNullOrWhiteSpace(_model.Reason))
+        {
+            _error = "invalid";
+            return;
+        }
+
+        var totalChange = _model.AdjustmentType switch
+        {
+            "Consumption" => -Math.Abs(units),
+            "Stock In" => Math.Abs(units),
+            _ => units
+        };
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Inventory.AdjustInventoryAsync(new InventoryAdjustmentRequest(
+                bloodType,
+                totalChange,
+                _model.Reason.Trim()));
+            _submitted = true;
+        }
+        catch (BloodLink.Domain.Exceptions.InsufficientInventoryException)
+        {
+            _error = "no-stock";
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (Exception)
+        {
+            _error = "load";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class AdjustForm
+    {
+        public BloodType? BloodType { get; set; }
+        public int? Units { get; set; }
+        public string? AdjustmentType { get; set; }
+        public string Reason { get; set; } = string.Empty;
+    }
+}
