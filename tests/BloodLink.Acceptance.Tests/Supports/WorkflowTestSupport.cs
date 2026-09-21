@@ -94,19 +94,22 @@ internal sealed class FakeInventoryService : IInventoryService
     public Task<IReadOnlyList<AvailabilityResultDto>> SearchAvailabilityAsync(AvailabilitySearchRequest request, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<AvailabilityResultDto>>([]);
 
-    public Task ReserveForRequestAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public int? UnitsReserved { get; private set; }
+
+    public Task ReserveForRequestAsync(Guid bloodRequestId, int unitsToReserve, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         ReserveCalls++;
+        UnitsReserved = unitsToReserve;
         return Task.CompletedTask;
     }
 
-    public Task ReleaseReservationAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         ReleaseCalls++;
         return Task.CompletedTask;
     }
 
-    public Task FulfilTransferAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public Task FulfilTransferAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         FulfilCalls++;
         return Task.CompletedTask;

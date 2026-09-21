@@ -6,6 +6,7 @@ using BloodLink.Domain.Enums;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Services.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BloodLink.Infrastructure.Services.Requests;
 
@@ -154,40 +155,40 @@ public sealed class BloodRequestService(
 
     public async Task AcceptAsync(RequestResponseRequest request, CancellationToken cancellationToken = default)
     {
-        var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
-        var bloodRequest = await LoadForSourceAdminAsync(request.BloodRequestId, cancellationToken);
-
-        if (bloodRequest.Status != BloodRequestStatus.Sent)
+        await ExecuteAtomicTransitionAsync(async () =>
         {
-            throw new InvalidOperationException("Only sent requests may be accepted.");
-        }
+            var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
+            var bloodRequest = await LoadForSourceAdminAsync(request.BloodRequestId, cancellationToken);
 
-        if (request.UnitsAccepted is not { } unitsAccepted)
-        {
-            throw new ArgumentException("Accepted units are required.");
-        }
+            if (bloodRequest.Status != BloodRequestStatus.Sent)
+            {
+                throw new InvalidOperationException("Only sent requests may be accepted.");
+            }
 
-        WorkflowValidation.EnsurePositiveUnits(unitsAccepted, nameof(request.UnitsAccepted));
-        WorkflowValidation.EnsureSafeNote(request.ResponseNote);
+            if (request.UnitsAccepted is not { } unitsAccepted)
+            {
+                throw new ArgumentException("Accepted units are required.");
+            }
 
-        if (unitsAccepted > bloodRequest.UnitsRequested)
-        {
-            throw new ArgumentException("Accepted units cannot exceed requested units.");
-        }
+            WorkflowValidation.EnsurePositiveUnits(unitsAccepted, nameof(request.UnitsAccepted));
+            WorkflowValidation.EnsureSafeNote(request.ResponseNote);
+            if (unitsAccepted > bloodRequest.UnitsRequested)
+            {
+                throw new ArgumentException("Accepted units cannot exceed requested units.");
+            }
 
-        await inventoryService.ReserveForRequestAsync(bloodRequest.Id, cancellationToken);
+            await inventoryService.ReserveForRequestAsync(bloodRequest.Id, unitsAccepted, deferSave: true, cancellationToken);
 
-        var nowUtc = DateTime.UtcNow;
-        var previousStatus = bloodRequest.Status;
-        bloodRequest.Status = BloodRequestStatus.Accepted;
-        bloodRequest.UnitsAccepted = unitsAccepted;
-        bloodRequest.RespondedByAdminId = userId;
-        bloodRequest.RespondedAtUtc = nowUtc;
-        bloodRequest.ResponseNote = TrimToNull(request.ResponseNote);
-        AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Accepted, bloodRequest.ResponseNote, userId, nowUtc);
-        await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestResponse, "Blood request accepted", "A source facility accepted your blood request.", nowUtc, cancellationToken);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
+            var nowUtc = DateTime.UtcNow;
+            bloodRequest.Status = BloodRequestStatus.Accepted;
+            bloodRequest.UnitsAccepted = unitsAccepted;
+            bloodRequest.RespondedByAdminId = userId;
+            bloodRequest.RespondedAtUtc = nowUtc;
+            bloodRequest.ResponseNote = TrimToNull(request.ResponseNote);
+            AddHistory(bloodRequest.Id, BloodRequestStatus.Sent, BloodRequestStatus.Accepted, bloodRequest.ResponseNote, userId, nowUtc);
+            AddAudit(bloodRequest, userId, "BloodRequestAccepted", $"Accepted {unitsAccepted} units.", nowUtc);
+            await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestResponse, "Blood request accepted", "A source facility accepted your blood request.", nowUtc, cancellationToken);
+        }, cancellationToken);
     }
 
     public async Task RejectAsync(RequestResponseRequest request, CancellationToken cancellationToken = default)
@@ -221,71 +222,129 @@ public sealed class BloodRequestService(
 
     public async Task CancelAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
     {
-        var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
-        var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
-        await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
-
-        var bloodRequest = await dbContext.BloodRequests
-            .SingleOrDefaultAsync(item => item.Id == bloodRequestId, cancellationToken)
-            ?? throw new InvalidOperationException("The blood request was not found.");
-
-        if (bloodRequest.RequestingFacilityId != facilityId && bloodRequest.SourceFacilityId != facilityId)
+        await ExecuteAtomicTransitionAsync(async () =>
         {
-            throw new UnauthorizedAccessException("You are not authorized to cancel this request.");
-        }
+            var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
+            var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
+            await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
+            var bloodRequest = await dbContext.BloodRequests.SingleOrDefaultAsync(item => item.Id == bloodRequestId, cancellationToken)
+                ?? throw new InvalidOperationException("The blood request was not found.");
 
-        if (bloodRequest.Status == BloodRequestStatus.Accepted)
-        {
-            await inventoryService.ReleaseReservationAsync(bloodRequest.Id, cancellationToken);
-        }
-        else if (bloodRequest.Status != BloodRequestStatus.Sent)
-        {
-            throw new InvalidOperationException("Only sent or accepted requests may be cancelled.");
-        }
+            if (bloodRequest.RequestingFacilityId != facilityId && bloodRequest.SourceFacilityId != facilityId)
+            {
+                throw new UnauthorizedAccessException("You are not authorized to cancel this request.");
+            }
 
-        var nowUtc = DateTime.UtcNow;
-        var previousStatus = bloodRequest.Status;
-        bloodRequest.Status = BloodRequestStatus.Cancelled;
-        AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Cancelled, "Request cancelled.", userId, nowUtc);
-        await AddOppositeSideCancellationNotificationAsync(bloodRequest, facilityId, nowUtc, cancellationToken);
+            var previousStatus = bloodRequest.Status;
+            if (previousStatus == BloodRequestStatus.Accepted)
+            {
+                await inventoryService.ReleaseReservationAsync(bloodRequest.Id, deferSave: true, cancellationToken);
+            }
+            else if (previousStatus != BloodRequestStatus.Sent)
+            {
+                throw new InvalidOperationException("Only sent or accepted requests may be cancelled.");
+            }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+            var nowUtc = DateTime.UtcNow;
+            bloodRequest.Status = BloodRequestStatus.Cancelled;
+            AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Cancelled, "Request cancelled.", userId, nowUtc);
+            AddAudit(bloodRequest, userId, "BloodRequestCancelled", "Cancelled blood request.", nowUtc);
+            await AddOppositeSideCancellationNotificationAsync(bloodRequest, facilityId, nowUtc, cancellationToken);
+        }, cancellationToken);
     }
 
     public async Task FulfilAsync(FulfilRequestRequest request, CancellationToken cancellationToken = default)
     {
-        var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
-        var bloodRequest = await LoadForSourceAdminAsync(request.BloodRequestId, cancellationToken);
-
-        if (bloodRequest.Status != BloodRequestStatus.Accepted)
+        await ExecuteAtomicTransitionAsync(async () =>
         {
-            throw new InvalidOperationException("Only accepted requests may be fulfilled.");
+            var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
+            var bloodRequest = await LoadForSourceAdminAsync(request.BloodRequestId, cancellationToken);
+            if (bloodRequest.Status != BloodRequestStatus.Accepted)
+            {
+                throw new InvalidOperationException("Only accepted requests may be fulfilled.");
+            }
+
+            WorkflowValidation.EnsureSafeNote(request.Note);
+            var need = await dbContext.BloodNeeds.SingleOrDefaultAsync(item => item.Id == bloodRequest.BloodNeedId, cancellationToken)
+                ?? throw new InvalidOperationException("The linked blood need was not found.");
+            if (need.Status != BloodNeedStatus.Searching)
+            {
+                throw new InvalidOperationException("The linked blood need must still be searching before this request can be fulfilled.");
+            }
+
+            await inventoryService.FulfilTransferAsync(bloodRequest.Id, deferSave: true, cancellationToken);
+
+            var nowUtc = DateTime.UtcNow;
+            bloodRequest.Status = BloodRequestStatus.Fulfilled;
+            bloodRequest.FulfilledByAdminId = userId;
+            bloodRequest.FulfilledAtUtc = nowUtc;
+            need.Status = BloodNeedStatus.FulfilledExternally;
+            need.UpdatedAtUtc = nowUtc;
+            AddHistory(bloodRequest.Id, BloodRequestStatus.Accepted, BloodRequestStatus.Fulfilled, TrimToNull(request.Note), userId, nowUtc);
+            AddAudit(bloodRequest, userId, "BloodRequestFulfilled", $"Transferred {bloodRequest.UnitsAccepted} units.", nowUtc);
+            await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestFulfilled, "Blood request fulfilled", "A source facility marked your blood request fulfilled.", nowUtc, cancellationToken);
+        }, cancellationToken);
+    }
+
+    private async Task ExecuteAtomicTransitionAsync(Func<Task> transition, CancellationToken cancellationToken)
+    {
+        IDbContextTransaction? transaction = null;
+        if (dbContext.Database.IsRelational())
+        {
+            transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         }
 
-        WorkflowValidation.EnsureSafeNote(request.Note);
-
-        var need = await dbContext.BloodNeeds
-            .SingleOrDefaultAsync(item => item.Id == bloodRequest.BloodNeedId, cancellationToken)
-            ?? throw new InvalidOperationException("The linked blood need was not found.");
-
-        if (need.Status != BloodNeedStatus.Searching)
+        try
         {
-            throw new InvalidOperationException("The linked blood need must still be searching before this request can be fulfilled.");
+            await transition();
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
         }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
 
-        await inventoryService.FulfilTransferAsync(bloodRequest.Id, cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            throw new Domain.Exceptions.ConcurrencyException("The request or inventory changed concurrently. Please retry.", ex);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
 
-        var nowUtc = DateTime.UtcNow;
-        var previousStatus = bloodRequest.Status;
-        bloodRequest.Status = BloodRequestStatus.Fulfilled;
-        bloodRequest.FulfilledByAdminId = userId;
-        bloodRequest.FulfilledAtUtc = nowUtc;
-        need.Status = BloodNeedStatus.FulfilledExternally;
-        need.UpdatedAtUtc = nowUtc;
-        AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Fulfilled, TrimToNull(request.Note), userId, nowUtc);
-        await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestFulfilled, "Blood request fulfilled", "A source facility marked your blood request fulfilled.", nowUtc, cancellationToken);
+            dbContext.ChangeTracker.Clear();
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+    private void AddAudit(BloodRequest request, string actorUserId, string action, string summary, DateTime nowUtc)
+    {
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            ActorUserId = actorUserId,
+            Action = action,
+            EntityType = nameof(BloodRequest),
+            EntityId = request.Id,
+            FacilityId = request.SourceFacilityId,
+            Summary = summary,
+            CreatedAtUtc = nowUtc
+        });
     }
 
     private async Task<BloodRequest> LoadForSourceAdminAsync(Guid bloodRequestId, CancellationToken cancellationToken)

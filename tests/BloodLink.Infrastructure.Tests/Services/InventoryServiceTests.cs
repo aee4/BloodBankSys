@@ -198,6 +198,27 @@ public class InventoryServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AdjustInventoryAsync_RejectsTotalBelowReservedUnits()
+    {
+        SeedApprovedFacility(_facilityId);
+        _mockCurrentUserService.Setup(s => s.IsInRole("FacilityAdmin")).Returns(true);
+        _context.BloodInventory.Add(new BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = _facilityId,
+            BloodType = BloodType.OPositive,
+            TotalUnits = 10,
+            ReservedUnits = 6,
+            LowStockThreshold = 10,
+            UpdatedAtUtc = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<InsufficientInventoryException>(() =>
+            _service.AdjustInventoryAsync(new InventoryAdjustmentRequest(BloodType.OPositive, -5, "Consumption")));
+    }
+
+    [Fact]
     public async Task AdjustInventoryAsync_ThrowsWhenNotFacilityAdmin()
     {
         // Arrange
@@ -500,6 +521,7 @@ public class InventoryServiceTests : IDisposable
     {
         // Arrange
         SeedApprovedFacility(_sourceFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_sourceFacilityId);
 
         var inventory = new BloodInventory
         {
@@ -531,7 +553,7 @@ public class InventoryServiceTests : IDisposable
         _context.SaveChanges();
 
         // Act
-        await _service.ReserveForRequestAsync(request.Id);
+        await _service.ReserveForRequestAsync(request.Id, request.UnitsRequested);
 
         // Assert
         var updatedInventory = await _context.BloodInventory.FirstOrDefaultAsync(bi => bi.Id == inventory.Id);
@@ -549,6 +571,8 @@ public class InventoryServiceTests : IDisposable
     public async Task ReserveForRequestAsync_ThrowsWhenInsufficientAvailableUnits()
     {
         // Arrange
+        SeedApprovedFacility(_sourceFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_sourceFacilityId);
         var inventory = new BloodInventory
         {
             Id = Guid.NewGuid(),
@@ -579,14 +603,14 @@ public class InventoryServiceTests : IDisposable
         _context.SaveChanges();
 
         // Act & Assert
-        await Assert.ThrowsAsync<InsufficientInventoryException>(() => _service.ReserveForRequestAsync(request.Id));
+        await Assert.ThrowsAsync<InsufficientInventoryException>(() => _service.ReserveForRequestAsync(request.Id, request.UnitsRequested));
     }
 
     [Fact]
     public async Task ReserveForRequestAsync_ThrowsWhenRequestNotFound()
     {
         // Act & Assert
-        await Assert.ThrowsAsync<EntityNotFoundException>(() => _service.ReserveForRequestAsync(Guid.NewGuid()));
+        await Assert.ThrowsAsync<EntityNotFoundException>(() => _service.ReserveForRequestAsync(Guid.NewGuid(), 1));
     }
 
     #endregion

@@ -22,6 +22,12 @@ internal static class WorkflowTestSupport
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
 
+        return CreateDbContext(options);
+    }
+
+    public static BloodLinkDbContext CreateDbContext(DbContextOptions<BloodLinkDbContext> options)
+    {
+
         var dbContext = new BloodLinkDbContext(options);
         dbContext.Roles.AddRange(
             new IdentityRole(RoleNames.SystemAdmin) { Id = RoleNames.SystemAdmin, NormalizedName = RoleNames.SystemAdmin.ToUpperInvariant() },
@@ -152,19 +158,22 @@ internal sealed class FakeInventoryService : IInventoryService
     public Task<IReadOnlyList<AvailabilityResultDto>> SearchAvailabilityAsync(AvailabilitySearchRequest request, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<AvailabilityResultDto>>([]);
 
-    public Task ReserveForRequestAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public int? UnitsReserved { get; private set; }
+
+    public Task ReserveForRequestAsync(Guid bloodRequestId, int unitsToReserve, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         ReserveCalls++;
+        UnitsReserved = unitsToReserve;
         return FailReserve ? Task.FromException(new InvalidOperationException("reserve failed")) : Task.CompletedTask;
     }
 
-    public Task ReleaseReservationAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         ReleaseCalls++;
         return FailRelease ? Task.FromException(new InvalidOperationException("release failed")) : Task.CompletedTask;
     }
 
-    public Task FulfilTransferAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public Task FulfilTransferAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         FulfilCalls++;
         return FailFulfil ? Task.FromException(new InvalidOperationException("fulfil failed")) : Task.CompletedTask;

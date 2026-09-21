@@ -55,13 +55,13 @@ public interface IInventoryService
     /// Atomically increases ReservedUnits and creates a Reserve transaction.
     /// Throws if insufficient AvailableUnits or RowVersion conflict.
     /// </summary>
-    Task ReserveForRequestAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);
+    Task ReserveForRequestAsync(Guid bloodRequestId, int unitsToReserve, bool deferSave = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Releases a previous reservation if request is cancelled before fulfilment.
     /// Atomically decreases ReservedUnits and creates a Release transaction.
     /// </summary>
-    Task ReleaseReservationAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);
+    Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Transfers reserved blood from source facility to requesting facility.
@@ -69,5 +69,5 @@ public interface IInventoryService
     /// Creates TransferOut and TransferIn transactions for both facilities.
     /// Must be called only after real-world handover confirmation.
     /// </summary>
-    Task FulfilTransferAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);
+    Task FulfilTransferAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default);
 }

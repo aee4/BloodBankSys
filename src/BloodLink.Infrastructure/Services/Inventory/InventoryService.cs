@@ -75,11 +75,21 @@ public sealed class InventoryService : IInventoryService
             _context.BloodInventory.Add(inventory);
         }
 
-        // Validate new total is non-negative
-        var newTotal = inventory.TotalUnits + request.TotalUnitsChange;
-        if (newTotal < 0)
+        if (request.TotalUnitsChange == 0)
         {
-            throw new InsufficientInventoryException($"Inventory adjustment would result in negative units. Current: {inventory.TotalUnits}, Change: {request.TotalUnitsChange}");
+            throw new ArgumentException("Inventory adjustment must change total units.", nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Reason))
+        {
+            throw new ArgumentException("An inventory adjustment reason is required.", nameof(request));
+        }
+
+        // Reserved stock cannot be removed by a total adjustment.
+        var newTotal = inventory.TotalUnits + request.TotalUnitsChange;
+        if (newTotal < inventory.ReservedUnits)
+        {
+            throw new InsufficientInventoryException($"Inventory adjustment would reduce total units below reserved units. Total: {inventory.TotalUnits}, Reserved: {inventory.ReservedUnits}, Change: {request.TotalUnitsChange}");
         }
 
         // Update inventory
@@ -197,7 +207,7 @@ public sealed class InventoryService : IInventoryService
         return availabilityResults.AsReadOnly();
     }
 
-    public async Task ReserveForRequestAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public async Task ReserveForRequestAsync(Guid bloodRequestId, int unitsToReserve, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         // Get the blood request
         var request = await _context.BloodRequests
@@ -210,19 +220,37 @@ public sealed class InventoryService : IInventoryService
             throw new BusinessRuleViolationException($"Cannot reserve for request with status {request.Status}. Only Sent requests can be reserved.");
         }
 
+        if (unitsToReserve <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(unitsToReserve), "Reserved units must be positive.");
+        }
+
+        if (unitsToReserve > request.UnitsRequested)
+        {
+            throw new ArgumentException("Reserved units cannot exceed requested units.", nameof(unitsToReserve));
+        }
+
+        ValidateFacilityAdminAuthorization();
+        if (_currentUserService.FacilityId != request.SourceFacilityId)
+        {
+            throw new Domain.Exceptions.UnauthorizedAccessException("Only the source facility admin may reserve inventory for this request.");
+        }
+
+        await GetApprovedFacilityAsync(request.SourceFacilityId, cancellationToken);
+
         // Get the source facility inventory
         var sourceInventory = await _context.BloodInventory
             .FirstOrDefaultAsync(bi => bi.FacilityId == request.SourceFacilityId && bi.BloodType == request.BloodType, cancellationToken)
             ?? throw new EntityNotFoundException($"Inventory not found for source facility {request.SourceFacilityId} and blood type {request.BloodType}.");
 
         // Verify sufficient available units
-        if (sourceInventory.AvailableUnits < request.UnitsRequested)
+        if (sourceInventory.AvailableUnits < unitsToReserve)
         {
-            throw new InsufficientInventoryException($"Insufficient available units. Required: {request.UnitsRequested}, Available: {sourceInventory.AvailableUnits}");
+            throw new InsufficientInventoryException($"Insufficient available units. Required: {unitsToReserve}, Available: {sourceInventory.AvailableUnits}");
         }
 
         // Atomically reserve units
-        sourceInventory.ReservedUnits += request.UnitsRequested;
+        sourceInventory.ReservedUnits += unitsToReserve;
         sourceInventory.UpdatedAtUtc = DateTime.UtcNow;
 
         // Create immutable reservation transaction
@@ -232,7 +260,7 @@ public sealed class InventoryService : IInventoryService
             BloodInventoryId = sourceInventory.Id,
             TransactionType = InventoryTransactionType.Reserve,
             TotalUnitsChange = 0,
-            ReservedUnitsChange = request.UnitsRequested,
+            ReservedUnitsChange = unitsToReserve,
             TotalAfter = sourceInventory.TotalUnits,
             ReservedAfter = sourceInventory.ReservedUnits,
             Reason = $"Reservation for blood request {bloodRequestId} from {request.RequestingFacilityId}",
@@ -244,17 +272,13 @@ public sealed class InventoryService : IInventoryService
 
         _context.InventoryTransactions.Add(transaction);
 
-        try
+        if (!deferSave)
         {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            throw new ConcurrencyException("Inventory was modified concurrently. Reservation failed. Please try again.", ex);
+            await SaveInventoryMutationAsync("Reservation failed. Please try again.", cancellationToken);
         }
     }
 
-    public async Task ReleaseReservationAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public async Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         // Get the blood request
         var request = await _context.BloodRequests
@@ -301,17 +325,13 @@ public sealed class InventoryService : IInventoryService
 
         _context.InventoryTransactions.Add(transaction);
 
-        try
+        if (!deferSave)
         {
-            await _context.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            throw new ConcurrencyException("Inventory was modified concurrently. Release failed. Please try again.", ex);
+            await SaveInventoryMutationAsync("Release failed. Please try again.", cancellationToken);
         }
     }
 
-    public async Task FulfilTransferAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    public async Task FulfilTransferAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         // Get the blood request
         var request = await _context.BloodRequests
@@ -401,13 +421,21 @@ public sealed class InventoryService : IInventoryService
         _context.InventoryTransactions.Add(transferOutTransaction);
         _context.InventoryTransactions.Add(transferInTransaction);
 
+        if (!deferSave)
+        {
+            await SaveInventoryMutationAsync("Transfer failed. Please try again.", cancellationToken);
+        }
+    }
+
+    private async Task SaveInventoryMutationAsync(string message, CancellationToken cancellationToken)
+    {
         try
         {
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
-            throw new ConcurrencyException("Inventory was modified concurrently. Transfer failed. Please try again.", ex);
+            throw new ConcurrencyException($"Inventory was modified concurrently. {message}", ex);
         }
     }
 

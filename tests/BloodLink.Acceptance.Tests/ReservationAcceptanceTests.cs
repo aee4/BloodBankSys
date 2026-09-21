@@ -45,5 +45,6 @@ public sealed class ReservationAcceptanceTests
 
         // Accepting is the one action that should reserve stock, and only once.
         Assert.Equal(1, inventory.ReserveCalls);
+        Assert.Equal(3, inventory.UnitsReserved);
     }
 }
