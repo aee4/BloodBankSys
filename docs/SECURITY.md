@@ -107,14 +107,14 @@ Already-rendered data cannot be recalled. These checks do not cancel an operatio
 
 ## Route coverage and frontend handoff
 
-The current tree contains public `/`, `/facility/register`, login, forgot/reset-password, access-denied, error and not-found pages. The implemented protected account pages `/account/manage` and `/account/change-password` use `AccountSession`. Test-only endpoints separately exercise the default operational policy and all canonical policies. The router uses `AuthorizeRouteView`; test-only HTTP endpoints exercise all four canonical policies without introducing business pages.
+The current tree contains public, account, and protected business pages. The protected account pages `/account/manage` and `/account/change-password` use `AccountSession`. The router uses `AuthorizeRouteView`, and test-only HTTP endpoints separately exercise the default operational policy and all canonical policies.
 
-Business routes listed in the blueprint are not implemented yet. Their owners should apply:
+The route-policy contract is:
 
-| Planned pages | Policy / required handoff |
+| Pages | Policy / required handoff |
 | --- | --- |
 | `/system/facilities`, `/system/facilities/{id}`, `/system/audit`, `/system/dashboard` | `RequireSystemAdmin` |
-| `/facility/profile` | `RequireApprovedFacilityUser` for shared viewing; FacilityAdmin guard for edits |
+| `/facility/profile` | `RequireFacilityAdmin` |
 | `/facility/staff`, `/facility/staff/create` | `RequireFacilityAdmin` |
 | `/inventory`, `/inventory/history` | `RequireApprovedFacilityUser`; service still enforces own-facility scope |
 | `/inventory/adjust`, `/inventory/search` | `RequireFacilityAdmin` |
@@ -124,7 +124,7 @@ Business routes listed in the blueprint are not implemented yet. Their owners sh
 | `/dashboard` | `RequireApprovedFacilityUser` and role-specific existing service |
 | `/notifications` | Default operational policy and own-recipient service checks |
 
-These are applications of existing contracts, not new business permissions. Do not rely on hidden navigation or `AuthorizeView` for event-handler security. Do not use `AccountSession` on operational pages. There were no other implemented protected business pages to annotate, and none were redesigned.
+These are applications of existing contracts, not new business permissions. Phase 4B explicitly applies `RequireFacilityAdmin` to `/facility/profile`, `/facility/staff`, `/facility/staff/create`, and `/requests/received`; other rows remain the authorization handoff for their owners. Do not rely on hidden navigation or `AuthorizeView` for event-handler security. Do not use `AccountSession` on operational pages.
 
 ## Security-owned — web headers and route-default review
 

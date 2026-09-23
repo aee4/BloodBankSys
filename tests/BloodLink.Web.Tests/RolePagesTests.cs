@@ -21,8 +21,8 @@ public sealed class RolePagesTests
 
         foreach (var path in new[]
         {
-            "/requests/sent", "/requests/in", "/requests/3F2504E0-4F89-41D3-9A0C-0305E82C3301",
-            "/staff", "/staff/new", "/facility", "/notifications", "/system/facilities"
+            "/requests/sent", "/requests/received", "/requests/3F2504E0-4F89-41D3-9A0C-0305E82C3301",
+            "/facility/staff", "/facility/staff/create", "/facility/profile", "/notifications", "/system/facilities"
         })
         {
             var response = await client.GetAsync(path);
@@ -103,7 +103,7 @@ public sealed class RolePagesTests
         }
         await SecurityTestApplication.LoginAsync(client, user);
 
-        var response = await client.GetAsync("/requests/in");
+        var response = await client.GetAsync("/requests/received");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
@@ -169,7 +169,7 @@ public sealed class RolePagesTests
         var user = await app.SeedAsync(RoleNames.FacilityAdmin);
         await SecurityTestApplication.LoginAsync(client, user);
 
-        var response = await client.GetAsync("/staff");
+        var response = await client.GetAsync("/facility/staff");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
@@ -196,7 +196,7 @@ public sealed class RolePagesTests
         }
         await SecurityTestApplication.LoginAsync(client, user);
 
-        var response = await client.GetAsync("/facility");
+        var response = await client.GetAsync("/facility/profile");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();

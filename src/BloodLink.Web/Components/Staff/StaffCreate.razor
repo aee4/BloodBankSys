@@ -1,7 +1,7 @@
-@page "/staff/new"
+@page "/facility/staff/create"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @using System.ComponentModel.DataAnnotations
 @inject IStaffService Staff
 @inject ICurrentUserService CurrentUser
@@ -9,7 +9,7 @@
 <PageTitle>Add Staff Member | BloodLink</PageTitle>
 
 <div class="bl-breadcrumb">
-    <a href="/staff">Staff</a>
+    <a href="/facility/staff">Staff</a>
     <AppIcon Name="chevron-right" Size="12" />
     <span>Add Staff Member</span>
 </div>
@@ -37,8 +37,8 @@ else if (_created is not null)
             The staff member must create a new password when they first log in.
         </p>
         <div class="bl-panel-actions">
-            <a class="bl-btn bl-btn-primary" href="/staff/new"><AppIcon Name="user-plus" Size="14" /> Add Another</a>
-            <a class="bl-btn bl-btn-outline" href="/staff"><AppIcon Name="arrow-left" Size="14" /> Back to Staff</a>
+            <a class="bl-btn bl-btn-primary" href="/facility/staff/create"><AppIcon Name="user-plus" Size="14" /> Add Another</a>
+            <a class="bl-btn bl-btn-outline" href="/facility/staff"><AppIcon Name="arrow-left" Size="14" /> Back to Staff</a>
         </div>
     </section>
 }
@@ -88,7 +88,7 @@ else
             }
 
             <div class="bl-form-actions">
-                <a class="bl-btn bl-btn-outline" href="/staff">Cancel</a>
+                <a class="bl-btn bl-btn-outline" href="/facility/staff">Cancel</a>
                 <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
                     <AppIcon Name="user-plus" Size="14" /> Create Staff Member
                 </button>

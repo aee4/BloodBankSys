@@ -1,7 +1,7 @@
-@page "/staff"
+@page "/facility/staff"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IStaffService Staff
 @inject ICurrentUserService CurrentUser
 @inject NavigationManager Nav
@@ -13,7 +13,7 @@
         <h1 class="bl-dash-title">Staff</h1>
         <p class="bl-dash-subtitle">Facility staff accounts and access</p>
     </div>
-    <a class="bl-btn bl-btn-primary" href="/staff/new">
+    <a class="bl-btn bl-btn-primary" href="/facility/staff/create">
         <AppIcon Name="user-plus" Size="14" /> Add Staff Member
     </a>
 </div>
@@ -38,7 +38,7 @@ else if (_staff.Count == 0)
 {
     <EmptyState Icon="users" Title="No staff members yet"
                 Description="Add facility staff accounts so they can submit blood needs.">
-        <a class="bl-btn bl-btn-primary" href="/staff/new">Add Staff Member</a>
+        <a class="bl-btn bl-btn-primary" href="/facility/staff/create">Add Staff Member</a>
     </EmptyState>
 }
 else

@@ -34,7 +34,7 @@ else if (_request is null)
 else
 {
     <nav class="bl-breadcrumb">
-        <a href="/requests/@(_isSource ? "in" : "sent")">Requests @(_isSource ? "Received" : "Sent")</a>
+        <a href="/requests/@(_isSource ? "received" : "sent")">Requests @(_isSource ? "Received" : "Sent")</a>
         <AppIcon Name="chevron-right" Size="12" />
         <span>@BloodDisplay.ShortId(Id)</span>
     </nav>
