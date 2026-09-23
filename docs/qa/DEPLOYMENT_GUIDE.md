@@ -24,7 +24,7 @@
 Application configuration uses ASP.NET Core hierarchical configuration providers:
 1. `appsettings.json` (Base configuration defaults)
 2. `appsettings.{Environment}.json` (Environment overrides, e.g. `Development`, `Staging`, `Production`)
-3. Environment Variables (e.g., `ConnectionStrings__BloodLinkDatabase`)
+3. Environment Variables (e.g., `ConnectionStrings__DefaultConnection`)
 4. Secret Managers / Azure Key Vault (Production secrets)
 
 > [!IMPORTANT]
@@ -34,7 +34,7 @@ Application configuration uses ASP.NET Core hierarchical configuration providers
 ```json
 {
   "ConnectionStrings": {
-    "BloodLinkDatabase": "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
   },
   "Logging": {
     "LogLevel": {
@@ -102,7 +102,7 @@ dotnet run --project src/BloodLink.Web/BloodLink.Web.csproj
 ```bash
 # Set environment
 export ASPNETCORE_ENVIRONMENT=Production
-export ConnectionStrings__BloodLinkDatabase="Server=db.bloodlink.internal;Database=BloodLink_Prod;User Id=bloodlink_app;Password=REDACTED;Encrypt=True;"
+export ConnectionStrings__DefaultConnection="Server=db.bloodlink.internal;Database=BloodLink_Prod;User Id=bloodlink_app;Password=REDACTED;Encrypt=True;"
 
 # Launch application
 dotnet ./dist/BloodLink.Web/BloodLink.Web.dll

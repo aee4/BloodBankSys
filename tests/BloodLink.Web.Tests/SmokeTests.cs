@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
 
 namespace BloodLink.Web.Tests;
 
@@ -27,7 +29,7 @@ public sealed class SmokeTests
     [Fact]
     public void Application_StartsWithoutDependencyInjectionErrors()
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using var factory = CreateFactory();
         var client = factory.CreateClient();
         Assert.NotNull(client);
     }
@@ -43,7 +45,7 @@ public sealed class SmokeTests
     [InlineData(typeof(IStaffService))]
     public void CoreApplicationServices_CanBeResolvedFromServiceScope(Type serviceType)
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using var factory = CreateFactory();
         using var scope = factory.Services.CreateScope();
         var service = scope.ServiceProvider.GetService(serviceType);
         Assert.NotNull(service);
@@ -52,7 +54,7 @@ public sealed class SmokeTests
     [Fact]
     public void DatabaseContextFactory_IsRegistered()
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using var factory = CreateFactory();
         using var scope = factory.Services.CreateScope();
         var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<BloodLinkDbContext>>();
         Assert.NotNull(dbFactory);
@@ -61,7 +63,7 @@ public sealed class SmokeTests
     [Fact]
     public void IdentityServices_AreRegistered()
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using var factory = CreateFactory();
         using var scope = factory.Services.CreateScope();
         var userManager = scope.ServiceProvider.GetService<UserManager<ApplicationUser>>();
         var signInManager = scope.ServiceProvider.GetService<SignInManager<ApplicationUser>>();
@@ -72,10 +74,18 @@ public sealed class SmokeTests
     [Fact]
     public async Task Application_RootEndpoint_RespondsWithoutCrashing()
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using var factory = CreateFactory();
         var client = factory.CreateClient();
         var response = await client.GetAsync("/");
         Assert.True((int)response.StatusCode < 500, $"Root endpoint failed with status code {response.StatusCode}");
     }
-}
 
+    private static WebApplicationFactory<Program> CreateFactory() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:DefaultConnection"] =
+                        "Server=(localdb)\\mssqllocaldb;Database=BloodLink_SmokeTests;Trusted_Connection=True"
+                })));
+}

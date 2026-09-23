@@ -51,14 +51,18 @@ The system does not make medical compatibility decisions and does not manage lab
 
 ## Local Setup
 
-```bash
-dotnet restore
-dotnet build
-dotnet test
-dotnet run --project src/BloodLink.Web/BloodLink.Web.csproj
+Install the x64 .NET 8 SDK, x64 ASP.NET Core 8 runtime, and SQL Server LocalDB (or another SQL Server development instance). Confirm `Microsoft.AspNetCore.App 8.0.x` appears in `dotnet --list-runtimes`.
+
+```powershell
+dotnet tool restore
+dotnet restore BloodLink.sln
+dotnet build BloodLink.sln --no-restore
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=(localdb)\MSSQLLocalDB;Database=BloodLink_Development;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True" --project src/BloodLink.Web
+dotnet ef database update --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
+dotnet run --project src/BloodLink.Web
 ```
 
-Use user secrets or environment variables for sensitive values. The checked-in connection string targets local development only.
+The repository contains no default database connection or bootstrap credentials. Use user secrets or environment variables for local values. See the [complete development setup](scripts/setup-development.md) before first launch.
 
 ## Useful Documents
 

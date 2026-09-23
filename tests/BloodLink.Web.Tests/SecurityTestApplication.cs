@@ -36,7 +36,12 @@ public sealed class SecurityTestApplication : WebApplicationFactory<Program>
     {
         builder.UseEnvironment(EnvironmentName);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
-            new Dictionary<string, string?> { ["Account:PublicOrigin"] = "https://localhost" }));
+            new Dictionary<string, string?>
+            {
+                ["Account:PublicOrigin"] = "https://localhost",
+                ["ConnectionStrings:DefaultConnection"] =
+                    "Server=(localdb)\\mssqllocaldb;Database=BloodLink_WebTests;Trusted_Connection=True"
+            }));
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<DbContextOptions<BloodLinkDbContext>>();

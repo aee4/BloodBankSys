@@ -194,7 +194,12 @@ public sealed class AuthorizationPolicyTests
 
             var services = new ServiceCollection();
             services.AddLogging();
-            services.AddBloodLinkInfrastructure(new ConfigurationBuilder().Build());
+            services.AddBloodLinkInfrastructure(new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:DefaultConnection"] =
+                        "Server=(localdb)\\mssqllocaldb;Database=BloodLink_AuthorizationTests;Trusted_Connection=True"
+                }).Build());
             services.AddSingleton<IDbContextFactory<BloodLinkDbContext>>(new TestFactory(options));
             provider = services.BuildServiceProvider();
             scope = provider.CreateScope();

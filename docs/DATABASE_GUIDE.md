@@ -17,13 +17,17 @@ BloodLink uses SQL Server, EF Core migrations, and ASP.NET Core Identity. The ca
 ## Migrations
 
 ```powershell
+dotnet tool restore
 dotnet ef migrations list --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
 dotnet ef database update --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
+dotnet ef migrations has-pending-model-changes --project src/BloodLink.Infrastructure --startup-project src/BloodLink.Web
 ```
 
 `20260921230224_EnforceCanonicalDatabaseIntegrity` is additive: it adds bounds, indexes, foreign keys, and checks without deleting data. It deliberately fails before changing the schema if existing rows violate key invariants or new uniqueness rules. Correct the reported data through an approved operational process and rerun; never modify the migration to discard records.
 
 Apply migrations as an explicit deployment step. Application startup does not call `Migrate` or `EnsureCreated`.
+
+Runtime and EF tooling use `ConnectionStrings:DefaultConnection`. Supply it through Web-project user secrets or `ConnectionStrings__DefaultConnection`; there is no tracked fallback. A credential-free LocalDB example and the complete clean-clone sequence are in `scripts/setup-development.md`.
 
 ## Initialization
 

@@ -27,11 +27,8 @@ public static class DependencyInjection
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        var connectionString = configuration.GetConnectionString("BloodLinkDatabase")
-            ?? "Server=(localdb)\\mssqllocaldb;Database=BloodLink_Development;Trusted_Connection=True;MultipleActiveResultSets=true";
-
         services.AddDbContextFactory<BloodLinkDbContext>(options =>
-            options.UseSqlServer(connectionString));
+            options.UseSqlServer(GetRequiredConnectionString(configuration)));
 
         services.AddIdentityCore<ApplicationUser>(options =>
             {
@@ -80,6 +77,16 @@ public static class DependencyInjection
         services.AddScoped<IInventoryService, InventoryService>();
 
         return services;
+    }
+
+    private static string GetRequiredConnectionString(IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        return string.IsNullOrWhiteSpace(connectionString)
+            ? throw new InvalidOperationException(
+                "Connection string 'ConnectionStrings:DefaultConnection' is required. " +
+                "Configure it with .NET user secrets or the ConnectionStrings__DefaultConnection environment variable.")
+            : connectionString;
     }
 
     private static void ConfigureAuthorization(AuthorizationOptions options)

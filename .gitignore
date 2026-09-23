@@ -18,6 +18,7 @@ appsettings.Local.json
 appsettings.Production.json
 appsettings.Development.json
 launchSettings.json
+!src/BloodLink.Web/Properties/launchSettings.json
 *.pfx
 *.pem
 *.key
