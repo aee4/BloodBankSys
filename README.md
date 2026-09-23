@@ -20,7 +20,7 @@ The system does not make medical compatibility decisions and does not manage lab
 - ASP.NET Core Identity
 - Bootstrap
 - xUnit
-- .NET 8 target framework, with the installed .NET 10 SDK pinned in `global.json`
+- .NET 8 target framework, with a compatible .NET 8 SDK selected by `global.json`
 
 ## Roles
 
@@ -52,6 +52,8 @@ The system does not make medical compatibility decisions and does not manage lab
 ## Local Setup
 
 Install the x64 .NET 8 SDK, x64 ASP.NET Core 8 runtime, and SQL Server LocalDB (or another SQL Server development instance). Confirm `Microsoft.AspNetCore.App 8.0.x` appears in `dotnet --list-runtimes`.
+
+`global.json` requests SDK `8.0.400` with `rollForward: latestFeature`. This selects the highest installed compatible feature band in the .NET 8 major/minor line, including compatible .NET 8 servicing and feature-band updates. It does not select .NET 9 or .NET 10, so installing either of those alone does not provide the required .NET 8 SDK or `Microsoft.AspNetCore.App 8.0.x` runtime.
 
 ```powershell
 dotnet tool restore

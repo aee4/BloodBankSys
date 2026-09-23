@@ -36,8 +36,9 @@ BloodLink outputs structured logs through Microsoft.Extensions.Logging:
 
 ### 2.2 Diagnostic Commands
 ```bash
-# Check if application host is running
-curl -i https://localhost:7083/
+# Check the local development endpoints from Windows PowerShell 5.1
+curl.exe --head --max-redirs 0 http://localhost:5080/
+curl.exe --silent --show-error --output NUL --write-out "%{http_code}" https://localhost:7080/
 
 # Verify local database connectivity using sqlcmd
 sqlcmd -S "(localdb)\mssqllocaldb" -d "BloodLink_Development" -Q "SELECT COUNT(*) FROM Facilities; SELECT COUNT(*) FROM BloodInventory;"

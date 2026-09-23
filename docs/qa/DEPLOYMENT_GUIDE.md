@@ -11,10 +11,10 @@
 ## 1. Prerequisites & Environment Requirements
 
 ### 1.1 Software & SDK Requirements
-* **.NET Runtime & SDK:** .NET 8 LTS runtime (with .NET 10 SDK pinned in `global.json`).
+* **.NET Runtime & SDK:** x64 .NET 8 SDK and x64 ASP.NET Core 8 runtime. `global.json` requests SDK `8.0.400` with `rollForward: latestFeature`, which permits compatible .NET 8 servicing and feature-band updates but never selects .NET 9 or .NET 10. A compatible .NET 8 SDK must be installed, and `Microsoft.AspNetCore.App 8.0.x` must appear in `dotnet --list-runtimes`.
 * **Database Engine:** Microsoft SQL Server 2019+, Azure SQL Database, or SQL Server LocalDB (`(localdb)\mssqllocaldb`) for local testing.
 * **Web Server Host:** Kestrel reverse-proxied behind IIS, Nginx, or Azure App Service.
-* **Network & Protocols:** HTTPS (TLS 1.2 / 1.3 required on port 443 / 7083).
+* **Network & Protocols:** HTTPS with TLS 1.2 or later on production port 443; the local development profile uses HTTPS port 7080.
 
 ---
 
@@ -28,7 +28,7 @@ Application configuration uses ASP.NET Core hierarchical configuration providers
 4. Secret Managers / Azure Key Vault (Production secrets)
 
 > [!IMPORTANT]
-> **No plaintext connection strings or credentials must ever be committed to git.** Refer to the template in [`appsettings.Example.json`](file:///c:/Users/HP/Documents/BloodBankSys/appsettings.Example.json).
+> **No plaintext connection strings or credentials must ever be committed to git.** Refer to the repository template in [`appsettings.Example.json`](../../appsettings.Example.json).
 
 ### 2.2 Standard Configuration Template
 ```json
@@ -57,8 +57,8 @@ Database schema management is strictly owned by **Salimah Salifu (Database Devel
 To apply all ordered migrations from the command line:
 
 ```bash
-# Ensure dotnet-ef tool is installed
-dotnet tool restore || dotnet tool install --global dotnet-ef
+# Restore the repository-local dotnet-ef tool
+dotnet tool restore
 
 # Apply migrations targeting the target database
 dotnet ef database update --project src/BloodLink.Infrastructure/BloodLink.Infrastructure.csproj --startup-project src/BloodLink.Web/BloodLink.Web.csproj --connection "Server=YOUR_SERVER;Database=BloodLink_Production;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=False;Encrypt=True;"
@@ -95,8 +95,8 @@ dotnet publish src/BloodLink.Web/BloodLink.Web.csproj --configuration Release --
 ```bash
 dotnet run --project src/BloodLink.Web/BloodLink.Web.csproj
 ```
-* HTTP endpoint: `http://localhost:5270`
-* HTTPS endpoint: `https://localhost:7083`
+* HTTP endpoint: `http://localhost:5080`
+* HTTPS endpoint: `https://localhost:7080`
 
 ### 5.2 Running in Staging / Production (Kestrel / Docker)
 ```bash

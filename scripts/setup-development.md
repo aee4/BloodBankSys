@@ -6,6 +6,8 @@ These steps start from a fresh clone on Windows. Run commands from the repositor
 
 Install Git, the x64 .NET 8 SDK, the x64 ASP.NET Core 8 runtime, and SQL Server LocalDB or another development SQL Server. The repository remains on `net8.0` and includes a local EF Core 8 tool manifest.
 
+`global.json` requests SDK `8.0.400` and sets `rollForward` to `latestFeature`. The .NET CLI may therefore select the highest installed compatible feature band within the .NET 8 major/minor line, including compatible .NET 8 servicing and feature-band updates. This policy does not authorize selection of .NET 9 or .NET 10. A compatible x64 .NET 8 SDK must still be installed, and installing a later major version alone does not supply the required ASP.NET Core 8 runtime.
+
 ```powershell
 dotnet --info
 dotnet --list-sdks
@@ -87,8 +89,22 @@ dotnet run --project src/BloodLink.Web
 The launch profile listens on `https://localhost:7080` and `http://localhost:5080`; use the exact `Now listening on` URL printed by the process. In another terminal:
 
 ```powershell
-Invoke-WebRequest -Uri http://localhost:5080/ -MaximumRedirection 0 -SkipHttpErrorCheck
+curl.exe --head --max-redirs 0 http://localhost:5080/
+curl.exe --silent --show-error --output NUL --write-out "%{http_code}" https://localhost:7080/
 ```
+
+The HTTP request must report `HTTP/1.1 307 Temporary Redirect`; the HTTPS request must print `200` when the development certificate is trusted. To diagnose an untrusted local development certificate only, run `curl.exe --insecure --silent --show-error --output NUL --write-out "%{http_code}" https://localhost:7080/`. Never use `--insecure` for production verification. The HTTPS check uses `GET` and discards the response body because the application endpoint does not support `HEAD`.
+
+Windows PowerShell 5.1 can alternatively verify the final response while following the redirect:
+
+```powershell
+$response = Invoke-WebRequest `
+    -Uri "http://localhost:5080/" `
+    -UseBasicParsing
+$response.StatusCode
+```
+
+Because `Invoke-WebRequest` follows redirects by default, this alternative normally reports the final HTTPS `200` response rather than the initial `307`.
 
 Stop the server with `Ctrl+C`.
 
