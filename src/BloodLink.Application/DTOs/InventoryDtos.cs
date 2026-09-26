@@ -12,7 +12,9 @@ public sealed record InventoryItemDto(
     int TotalUnits,
     int ReservedUnits,
     int AvailableUnits,
-    int LowStockThreshold);
+    int LowStockThreshold,
+    DateTime? UpdatedAtUtc,
+    byte[] RowVersion);
 
 /// <summary>
 /// Request to adjust inventory stock (stock-in, consumption, or manual adjustment).
@@ -20,7 +22,8 @@ public sealed record InventoryItemDto(
 public sealed record InventoryAdjustmentRequest(
     BloodType BloodType,
     int TotalUnitsChange,
-    string Reason);
+    string Reason,
+    byte[]? RowVersion = null);
 
 /// <summary>
 /// Immutable record of an inventory transaction.
@@ -31,6 +34,12 @@ public sealed record InventoryTransactionDto(
     InventoryTransactionType TransactionType,
     int TotalUnitsChange,
     int ReservedUnitsChange,
+    int TotalAfter,
+    int ReservedAfter,
+    string Reason,
+    string? ReferenceType,
+    Guid? ReferenceId,
+    string ActorDisplayName,
     DateTime CreatedAtUtc);
 
 /// <summary>
@@ -47,9 +56,11 @@ public sealed record AvailabilityResultDto(
     Guid FacilityId,
     string FacilityName,
     FacilityType FacilityType,
+    string Region,
     string City,
     BloodType BloodType,
-    int AvailableUnits);
+    int AvailableUnits,
+    DateTime UpdatedAtUtc);
 
 /// <summary>
 /// Request to get low-stock items for a facility.

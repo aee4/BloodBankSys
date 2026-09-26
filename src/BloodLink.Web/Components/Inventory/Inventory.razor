@@ -1,7 +1,7 @@
 @page "/inventory"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireApprovedFacilityUser)]
 @inject IInventoryService InventoryService
 @inject ICurrentUserService CurrentUser
 
@@ -12,12 +12,14 @@
         <h1 class="bl-dash-title">Inventory</h1>
         <p class="bl-dash-subtitle">Current blood stock at your facility</p>
     </div>
-    @if (_isAdmin)
-    {
-        <a class="bl-btn bl-btn-primary" href="/inventory/adjust">
-            <AppIcon Name="upload" Size="14" /> Adjust Inventory
-        </a>
-    }
+    <div class="bl-action-row">
+        <a class="bl-btn bl-btn-outline" href="/inventory/history"><AppIcon Name="history" Size="14" /> History</a>
+        @if (_isAdmin)
+        {
+            <a class="bl-btn bl-btn-outline" href="/inventory/search"><AppIcon Name="search" Size="14" /> Network Search</a>
+            <a class="bl-btn bl-btn-primary" href="/inventory/adjust"><AppIcon Name="upload" Size="14" /> Adjust Inventory</a>
+        }
+    </div>
 </div>
 
 @if (_loading)
@@ -27,7 +29,7 @@
 else if (_error == "no-access")
 {
     <AlertMessage Variant="danger" Title="No access">
-        <span>Your account is not active for operational access.</span>
+        <span>Your account is not active for approved facility inventory access.</span>
     </AlertMessage>
 }
 else if (_error == "load")
@@ -38,50 +40,63 @@ else if (_error == "load")
 }
 else
 {
-    <section class="bl-card">
+    @if (!_isAdmin)
+    {
+        <AlertMessage Variant="neutral" Title="View-only inventory">
+            <span>Facility staff can review stock levels, but only facility administrators can record adjustments or search the network.</span>
+        </AlertMessage>
+    }
+
+    <section class="bl-card" aria-labelledby="inventory-table-title">
+        <div class="bl-card-head">
+            <h2 id="inventory-table-title">All Blood Types</h2>
+            <button class="bl-btn-sm" type="button" @onclick="LoadAsync" disabled="@_loading">Refresh</button>
+        </div>
         <div class="bl-table-wrap">
             <table class="bl-table">
                 <thead>
                     <tr>
                         <th>Blood Type</th>
-                        <th>Available</th>
-                        <th>Reserved</th>
                         <th>Total</th>
-                        <th>Min. Threshold</th>
+                        <th>Reserved</th>
+                        <th>Available</th>
+                        <th>Low Threshold</th>
                         <th>Status</th>
-                        @if (_isAdmin) { <th></th> }
+                        <th>Last Updated</th>
+                        @if (_isAdmin) { <th>Action</th> }
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var (value, label) in BloodTypes)
+                    @foreach (var bloodType in BloodTypes)
                     {
-                        var item = _inventory.FirstOrDefault(inv => inv.BloodType == value);
-                        var available = item?.AvailableUnits ?? 0;
-                        var low = item is not null && available <= item.LowStockThreshold;
+                        var item = FindItem(bloodType);
+                        var total = item?.TotalUnits ?? 0;
+                        var reserved = item?.ReservedUnits ?? 0;
+                        var available = Math.Max(total - reserved, 0);
+                        var threshold = item?.LowStockThreshold ?? DefaultLowStockThreshold;
+                        var status = item is null
+                            ? "No stock recorded"
+                            : available <= threshold ? "Low stock" : "Healthy";
                         <tr>
-                            <td><BloodTypeBadge Value="value" /></td>
+                            <td><BloodTypeBadge Value="@bloodType" /></td>
+                            <td class="bl-strong">@total</td>
+                            <td>@reserved</td>
                             <td class="bl-strong">@available</td>
-                            <td class="bl-muted">@(item?.ReservedUnits ?? 0)</td>
-                            <td class="bl-muted">@(item?.TotalUnits ?? 0)</td>
-                            <td class="bl-muted">@(item?.LowStockThreshold ?? 0)</td>
+                            <td>@threshold</td>
                             <td>
-                                @if (item is null)
+                                <span class="bl-status-badge bl-status-@(item is null ? "neutral" : available <= threshold ? "danger" : "success")">
+                                    @status
+                                </span>
+                                @if (item is not null && available <= threshold)
                                 {
-                                    <span class="bl-status-badge bl-status-neutral">Not Set</span>
-                                }
-                                else if (low)
-                                {
-                                    <span class="bl-status-badge bl-status-danger">Low Stock</span>
-                                }
-                                else
-                                {
-                                    <span class="bl-status-badge bl-status-success">Healthy</span>
+                                    <div class="bl-muted">Available units are at or below the configured threshold.</div>
                                 }
                             </td>
+                            <td class="bl-muted">@(item?.UpdatedAtUtc is { } updated ? BloodDisplay.FormatTimestamp(updated) : "Never")</td>
                             @if (_isAdmin)
                             {
                                 <td class="bl-right">
-                                    <a class="bl-link" href="/inventory/adjust">Adjust <AppIcon Name="chevron-right" Size="12" /></a>
+                                    <a class="bl-link" href="@($"/inventory/adjust?bloodType={bloodType}")">Adjust</a>
                                 </td>
                             }
                         </tr>
@@ -94,24 +109,30 @@ else
     @if (_lowStock.Count > 0)
     {
         <AlertMessage Variant="danger" Title="Low-stock alert">
-            <span>@string.Join(", ", _lowStock.Select(alert => BloodDisplay.BloodTypeLabel(alert.BloodType))) is below the minimum threshold.</span>
+            <span>@string.Join(", ", _lowStock.Select(alert => BloodDisplay.BloodTypeLabel(alert.BloodType))) is at or below the minimum threshold.</span>
         </AlertMessage>
     }
 }
 
 @code {
+    private const int DefaultLowStockThreshold = 10;
     private bool _loading = true;
     private string? _error;
     private bool _isAdmin;
     private IReadOnlyList<InventoryItemDto> _inventory = [];
-
-    private static readonly (BloodType Value, string Label)[] BloodTypes =
-        Enum.GetValues<BloodType>().Select(value => (value, BloodDisplay.BloodTypeLabel(value))).ToArray();
-
     private List<LowStockAlertDto> _lowStock = [];
 
-    protected override async Task OnInitializedAsync()
+    private static readonly BloodType[] BloodTypes = Enum.GetValues<BloodType>();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private InventoryItemDto? FindItem(BloodType bloodType) =>
+        _inventory.FirstOrDefault(item => item.BloodType == bloodType);
+
+    private async Task LoadAsync()
     {
+        _loading = true;
+        _error = null;
         try
         {
             _isAdmin = CurrentUser.IsInRole(RoleNames.FacilityAdmin);

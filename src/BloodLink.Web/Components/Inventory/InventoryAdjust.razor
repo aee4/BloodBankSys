@@ -1,7 +1,7 @@
 @page "/inventory/adjust"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IInventoryService Inventory
 @inject ICurrentUserService CurrentUser
 
@@ -16,7 +16,7 @@
 @if (_error == "no-access")
 {
     <AlertMessage Variant="danger" Title="No access">
-        <span>Only facility administrators can adjust inventory. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
+        <span>Only active facility administrators can adjust inventory. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
     </AlertMessage>
 }
 else
@@ -24,166 +24,140 @@ else
     <div class="bl-dash-header">
         <div>
             <h1 class="bl-dash-title">Adjust Inventory</h1>
-            <p class="bl-dash-subtitle">Record a stock change</p>
+            <p class="bl-dash-subtitle">Record a stock change for your facility</p>
         </div>
     </div>
 
-    @if (_submitted)
+    @if (_loading)
     {
-        <section class="bl-card bl-card-pad bl-success-card">
+        <LoadingState Message="Loading current inventory..." />
+    }
+    else if (_submitted)
+    {
+        <section class="bl-card bl-card-pad bl-success-card" aria-live="polite">
             <span class="bl-success-icon"><AppIcon Name="circle-check" Size="32" /></span>
             <h1>Adjustment Recorded</h1>
-            <p>Inventory updated and transaction logged to the immutable history.</p>
+            <p>Inventory updated and exactly one transaction was added to the immutable history.</p>
             <div class="bl-form-actions">
                 <button class="bl-btn bl-btn-outline" type="button" @onclick="Reset">Another</button>
+                <a class="bl-btn bl-btn-outline" href="/inventory/history">View History</a>
                 <a class="bl-btn bl-btn-primary" href="/inventory">Back to Inventory</a>
             </div>
         </section>
     }
     else
     {
-        <div class="bl-page-main">
-            <section class="bl-card bl-card-pad">
-                <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="inventory-adjust" novalidate>
-                    @if (_error == "load")
-                    {
-                        <AlertMessage Variant="danger" Title="Adjustment not recorded">
-                            <span>We couldn't record the adjustment. Please try again later.</span>
-                        </AlertMessage>
-                    }
-                    @if (_error == "invalid")
-                    {
-                        <AlertMessage Variant="danger" Title="Check the form">
-                            <span>Please complete all required fields with valid values.</span>
-                        </AlertMessage>
-                    }
-                    @if (_error == "no-stock")
-                    {
-                        <AlertMessage Variant="danger" Title="Insufficient stock">
-                            <span>This adjustment would make available stock negative. Please check the current inventory.</span>
-                        </AlertMessage>
-                    }
+        <section class="bl-card bl-card-pad">
+            <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="inventory-adjust">
+                <ValidationSummary />
 
-                    <div class="bl-form-grid">
-                        <div class="bl-field">
-                            <label class="bl-label" for="inv-blood-type">Blood Type <span>*</span></label>
-                            <InputSelect id="inv-blood-type" class="bl-input bl-select" @bind-Value="_model.BloodType" required>
-                                <option value="">Select blood type</option>
-                                @foreach (var type in BloodTypes)
-                                {
-                                    <option value="@type.Value">@type.Label</option>
-                                }
-                            </InputSelect>
-                        </div>
-                        <div class="bl-field">
-                            <label class="bl-label" for="inv-units">Units <span>*</span></label>
-                            <InputNumber id="inv-units" class="bl-input" @bind-Value="_model.Units" placeholder="e.g. 10" required />
-                            <p class="bl-field-hint">@AdjustmentHint</p>
-                        </div>
-                    </div>
-
-                    <div class="bl-field bl-fieldset-gap">
-                        <label class="bl-label" id="inv-type-label">Adjustment Type <span>*</span></label>
-                        <div class="bl-toggle-group" role="radiogroup" aria-labelledby="inv-type-label">
-                            @foreach (var option in AdjustmentTypes)
-                            {
-                                <button type="button" class="bl-toggle-btn @(_model.AdjustmentType == option ? "is-active" : "")"
-                                        @onclick="() => _model.AdjustmentType = _model.AdjustmentType == option ? null : option">
-                                    @option
+                @if (_message is { Length: > 0 })
+                {
+                    <AlertMessage Variant="@_messageVariant" Title="@_messageTitle">
+                        <span>@_message</span>
+                        @if (_messageKind == "concurrency")
+                        {
+                            <div class="bl-form-actions">
+                                <button class="bl-btn bl-btn-outline" type="button" @onclick="ReloadCurrentValuesAsync" disabled="@_busy">
+                                    Reload Current Values
                                 </button>
-                            }
-                        </div>
-                    </div>
+                            </div>
+                        }
+                    </AlertMessage>
+                }
 
+                <div class="bl-form-grid">
                     <div class="bl-field">
-                        <label class="bl-label" for="inv-reason">Reason <span>*</span></label>
-                        <InputTextArea id="inv-reason" class="bl-input bl-textarea" @bind-Value="_model.Reason" rows="3"
-                                       placeholder="Required — describe the reason for this adjustment" />
+                        <label class="bl-label" for="inv-blood-type">Blood Type <span>*</span></label>
+                        <InputSelect id="inv-blood-type" class="bl-input bl-select" @bind-Value="_model.BloodType" @bind-Value:after="SelectBloodTypeAsync">
+                            <option value="">Select blood type</option>
+                            @foreach (var type in BloodTypes)
+                            {
+                                <option value="@type">@BloodDisplay.BloodTypeLabel(type)</option>
+                            }
+                        </InputSelect>
                     </div>
+                    <div class="bl-field">
+                        <label class="bl-label" for="inv-units">Signed unit change <span>*</span></label>
+                        <InputNumber id="inv-units" class="bl-input" @bind-Value="_model.Units" placeholder="e.g. 10 or -3" />
+                        <p class="bl-field-hint">Use a positive value to add stock and a negative value to remove stock. Zero is rejected.</p>
+                    </div>
+                </div>
 
-                    <div class="bl-form-actions">
-                        <a class="bl-btn bl-btn-outline" href="/inventory">Cancel</a>
-                        <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
-                            @if (_busy) { <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Recording...</span> }
-                            else { <span>Record Adjustment</span> }
-                        </button>
-                    </div>
-                </EditForm>
-            </section>
-        </div>
+                @if (_selected is not null || _model.BloodType is not null)
+                {
+                    var item = _selected;
+                    <section class="bl-card bl-card-pad bl-card-inline" aria-live="polite">
+                        <h2 class="bl-card-title">Current @BloodDisplay.BloodTypeLabel(_model.BloodType!.Value) Context</h2>
+                        <div class="bl-detail-grid">
+                            <div><p class="bl-label-optional">Total</p><p class="bl-strong">@(item?.TotalUnits ?? 0)</p></div>
+                            <div><p class="bl-label-optional">Reserved</p><p class="bl-strong">@(item?.ReservedUnits ?? 0)</p></div>
+                            <div><p class="bl-label-optional">Available</p><p class="bl-strong">@(item?.AvailableUnits ?? 0)</p></div>
+                            <div><p class="bl-label-optional">Threshold</p><p class="bl-strong">@(item?.LowStockThreshold ?? 10)</p></div>
+                            <div><p class="bl-label-optional">Last Updated</p><p class="bl-strong">@(item?.UpdatedAtUtc is { } updated ? BloodDisplay.FormatTimestamp(updated) : "Never")</p></div>
+                        </div>
+                    </section>
+                }
+
+                <div class="bl-field">
+                    <label class="bl-label" for="inv-reason">Reason <span>*</span></label>
+                    <InputTextArea id="inv-reason" class="bl-input bl-textarea" @bind-Value="_model.Reason" rows="3"
+                                   placeholder="Required - describe why this stock change is being recorded" />
+                </div>
+
+                <div class="bl-form-actions">
+                    <a class="bl-btn bl-btn-outline" href="/inventory">Cancel</a>
+                    <button class="bl-btn bl-btn-primary" type="submit" disabled="@(_busy || _messageKind == "concurrency")">
+                        @if (_busy) { <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Recording...</span> }
+                        else { <span>Record Adjustment</span> }
+                    </button>
+                </div>
+            </EditForm>
+        </section>
     }
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "bloodType")] public string? InitialBloodType { get; set; }
+
     private readonly AdjustForm _model = new();
+    private bool _loading = true;
     private bool _busy;
     private bool _submitted;
     private string? _error;
-    private bool _isAdmin;
+    private string? _message;
+    private string _messageVariant = "danger";
+    private string _messageTitle = "Check the adjustment";
+    private string? _messageKind;
+    private IReadOnlyList<InventoryItemDto> _inventory = [];
+    private InventoryItemDto? _selected;
 
-    private static readonly (BloodType Value, string Label)[] BloodTypes =
-        Enum.GetValues<BloodType>().Select(value => (value, BloodDisplay.BloodTypeLabel(value))).ToArray();
-
-    private static readonly string[] AdjustmentTypes = ["Stock In", "Consumption", "Manual Adjustment"];
-
-    private string AdjustmentHint => _model.AdjustmentType switch
-    {
-        "Stock In" => "Units added to stock (positive).",
-        "Consumption" => "Units removed from stock (consumed).",
-        "Manual Adjustment" => "Enter a signed value — positive to add, negative to remove.",
-        _ => string.Empty
-    };
+    private static readonly BloodType[] BloodTypes = Enum.GetValues<BloodType>();
 
     protected override async Task OnInitializedAsync()
     {
-        _isAdmin = CurrentUser.IsInRole(RoleNames.FacilityAdmin);
-        if (!_isAdmin) _error = "no-access";
-    }
-
-    private void Reset()
-    {
-        _model.BloodType = null;
-        _model.Units = null;
-        _model.AdjustmentType = null;
-        _model.Reason = string.Empty;
-        _submitted = false;
-        _error = null;
-    }
-
-    private async Task HandleSubmit()
-    {
-        if (!_isAdmin)
+        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
         {
             _error = "no-access";
-            return;
-        }
-        if (_model.BloodType is not { } bloodType || _model.Units is not { } units || units == 0 ||
-            string.IsNullOrWhiteSpace(_model.AdjustmentType) || string.IsNullOrWhiteSpace(_model.Reason))
-        {
-            _error = "invalid";
+            _loading = false;
             return;
         }
 
-        var totalChange = _model.AdjustmentType switch
+        if (Enum.TryParse<BloodType>(InitialBloodType, ignoreCase: false, out var bloodType))
         {
-            "Consumption" => -Math.Abs(units),
-            "Stock In" => Math.Abs(units),
-            _ => units
-        };
+            _model.BloodType = bloodType;
+        }
+        await LoadInventoryAsync();
+    }
 
-        _busy = true;
-        _error = null;
+    private async Task LoadInventoryAsync()
+    {
+        _loading = true;
         try
         {
-            await Inventory.AdjustInventoryAsync(new InventoryAdjustmentRequest(
-                bloodType,
-                totalChange,
-                _model.Reason.Trim()));
-            _submitted = true;
-        }
-        catch (BloodLink.Domain.Exceptions.InsufficientInventoryException)
-        {
-            _error = "no-stock";
+            _inventory = await Inventory.GetOwnInventoryAsync();
+            UpdateSelected();
+            _error = null;
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
@@ -191,7 +165,106 @@ else
         }
         catch (Exception)
         {
-            _error = "load";
+            SetMessage("Couldn't load current inventory. Please try again later.", "danger", "Couldn't load inventory");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectBloodTypeAsync()
+    {
+        await ReloadCurrentValuesAsync(clearMessage: true);
+    }
+
+    private async Task ReloadCurrentValuesAsync() => await ReloadCurrentValuesAsync(clearMessage: true);
+
+    private async Task ReloadCurrentValuesAsync(bool clearMessage)
+    {
+        try
+        {
+            _inventory = await Inventory.GetOwnInventoryAsync();
+            UpdateSelected();
+            if (clearMessage)
+            {
+                ClearMessage();
+            }
+        }
+        catch (Exception)
+        {
+            SetMessage("Couldn't reload current inventory. Please try again.", "danger", "Reload failed");
+        }
+    }
+
+    private void UpdateSelected()
+    {
+        _selected = _model.BloodType is { } bloodType
+            ? _inventory.FirstOrDefault(item => item.BloodType == bloodType)
+            : null;
+    }
+
+    private void Reset()
+    {
+        _model.BloodType = null;
+        _model.Units = null;
+        _model.Reason = string.Empty;
+        _selected = null;
+        _submitted = false;
+        ClearMessage();
+    }
+
+    private async Task HandleSubmit()
+    {
+        ClearMessage();
+
+        if (_model.BloodType is not { } bloodType)
+        {
+            SetMessage("Select a blood type before recording an adjustment.", "danger", "Blood type required");
+            return;
+        }
+        if (_model.Units is not { } units || units == 0)
+        {
+            SetMessage("Enter a non-zero signed unit change.", "danger", "Unit change required");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_model.Reason))
+        {
+            SetMessage("A reason is required for every inventory adjustment.", "danger", "Reason required");
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Inventory.AdjustInventoryAsync(new InventoryAdjustmentRequest(
+                bloodType,
+                units,
+                _model.Reason.Trim(),
+                _selected?.RowVersion));
+            _submitted = true;
+        }
+        catch (BloodLink.Domain.Exceptions.ConcurrencyException)
+        {
+            await ReloadCurrentValuesAsync(clearMessage: false);
+            SetMessage("Inventory changed after this page loaded. Reload the current values before trying again.", "danger", "Stale inventory values", "concurrency");
+        }
+        catch (BloodLink.Domain.Exceptions.InsufficientInventoryException)
+        {
+            await ReloadCurrentValuesAsync(clearMessage: false);
+            SetMessage("This adjustment would make total units fall below reserved units. Current reservations must remain protected.", "danger", "Insufficient stock");
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _error = "no-access";
+        }
+        catch (ArgumentException ex)
+        {
+            SetMessage(ex.Message, "danger", "Check the form");
+        }
+        catch (Exception)
+        {
+            SetMessage("We couldn't record the adjustment. Please try again later.", "danger", "Adjustment not recorded");
         }
         finally
         {
@@ -199,11 +272,24 @@ else
         }
     }
 
+    private void SetMessage(string message, string variant, string title, string? kind = null)
+    {
+        _message = message;
+        _messageVariant = variant;
+        _messageTitle = title;
+        _messageKind = kind;
+    }
+
+    private void ClearMessage()
+    {
+        _message = null;
+        _messageKind = null;
+    }
+
     private sealed class AdjustForm
     {
         public BloodType? BloodType { get; set; }
         public int? Units { get; set; }
-        public string? AdjustmentType { get; set; }
         public string Reason { get; set; } = string.Empty;
     }
 }

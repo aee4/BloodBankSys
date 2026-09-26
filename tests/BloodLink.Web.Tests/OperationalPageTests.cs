@@ -144,6 +144,10 @@ public sealed class OperationalPageTests
         Assert.Contains("28", html);
         Assert.Contains("Healthy", html);
         Assert.Contains("Adjust Inventory", html);
+        foreach (var bloodType in Enum.GetValues<BloodType>())
+        {
+            Assert.Contains($"/inventory/adjust?bloodType={bloodType}", html);
+        }
     }
 
     [Fact]
@@ -157,9 +161,26 @@ public sealed class OperationalPageTests
 
         var response = await client.GetAsync("/inventory/adjust");
 
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/account/access-denied", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task Staff_InventoryOverview_IsViewOnly()
+    {
+        using var app = new SecurityTestApplication();
+        using var client = app.Browser();
+
+        var user = await app.SeedAsync(RoleNames.FacilityStaff);
+        await SecurityTestApplication.LoginAsync(client, user);
+
+        var response = await client.GetAsync("/inventory");
+
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var html = await response.Content.ReadAsStringAsync();
-        Assert.Contains("Only facility administrators", html);
+        Assert.Contains("View-only inventory", html);
+        Assert.DoesNotContain("Adjust Inventory", html);
+        Assert.DoesNotContain("Network Search", html);
     }
 
     [Fact]
@@ -177,5 +198,75 @@ public sealed class OperationalPageTests
         var html = await response.Content.ReadAsStringAsync();
         Assert.Contains("Inventory History", html);
         Assert.Contains("No transactions yet", html);
+    }
+
+    [Fact]
+    public async Task Admin_InventoryHistory_RendersImmutableDetails()
+    {
+        using var app = new SecurityTestApplication();
+        using var client = app.Browser();
+
+        var user = await app.SeedAsync(RoleNames.FacilityAdmin);
+        await using (var db = await DbAsync(app))
+        {
+            var inventory = new BloodInventory
+            {
+                Id = Guid.NewGuid(),
+                FacilityId = user.FacilityId!.Value,
+                BloodType = BloodType.ANegative,
+                TotalUnits = 12,
+                ReservedUnits = 2,
+                LowStockThreshold = 5,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            db.BloodInventory.Add(inventory);
+            db.InventoryTransactions.Add(new InventoryTransaction
+            {
+                Id = Guid.NewGuid(),
+                BloodInventoryId = inventory.Id,
+                TransactionType = InventoryTransactionType.StockIn,
+                TotalUnitsChange = 12,
+                ReservedUnitsChange = 0,
+                TotalAfter = 12,
+                ReservedAfter = 2,
+                Reason = "Initial stock",
+                PerformedByUserId = user.Id,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+        await SecurityTestApplication.LoginAsync(client, user);
+
+        var response = await client.GetAsync("/inventory/history");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Initial stock", html);
+        Assert.True(
+            html.Contains("0 -&gt; 12", StringComparison.Ordinal) || html.Contains("0 -> 12", StringComparison.Ordinal),
+            "History should show the total-units before/after balance.");
+        Assert.True(
+            html.Contains("2 -&gt; 2", StringComparison.Ordinal) || html.Contains("2 -> 2", StringComparison.Ordinal),
+            "History should show the reserved-units before/after balance.");
+        Assert.DoesNotContain("Delete", html);
+    }
+
+    [Fact]
+    public async Task Admin_InventorySearch_IsPhase5BSearchOnly()
+    {
+        using var app = new SecurityTestApplication();
+        using var client = app.Browser();
+
+        var user = await app.SeedAsync(RoleNames.FacilityAdmin);
+        await SecurityTestApplication.LoginAsync(client, user);
+
+        var response = await client.GetAsync("/inventory/search");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Network Blood Search", html);
+        Assert.Contains("Search Network", html);
+        Assert.DoesNotContain("Request Blood", html);
+        Assert.DoesNotContain("Send Request", html);
     }
 }

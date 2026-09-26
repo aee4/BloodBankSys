@@ -1,7 +1,7 @@
 @page "/inventory/history"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireApprovedFacilityUser)]
 @inject IInventoryService Inventory
 @inject ICurrentUserService CurrentUser
 
@@ -16,8 +16,12 @@
 <div class="bl-dash-header">
     <div>
         <h1 class="bl-dash-title">Inventory History</h1>
-        <p class="bl-dash-subtitle">Immutable transaction log — all adjustments</p>
+        <p class="bl-dash-subtitle">Immutable stock transaction log</p>
     </div>
+    @if (_isAdmin)
+    {
+        <a class="bl-btn bl-btn-primary" href="/inventory/adjust"><AppIcon Name="upload" Size="14" /> Record Adjustment</a>
+    }
 </div>
 
 @if (_loading)
@@ -27,7 +31,7 @@
 else if (_error == "no-access")
 {
     <AlertMessage Variant="danger" Title="No access">
-        <span>Your account is not active for operational access. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
+        <span>Your account is not active for approved facility inventory access.</span>
     </AlertMessage>
 }
 else if (_error == "load")
@@ -39,7 +43,7 @@ else if (_error == "load")
 else if (_transactions.Count == 0)
 {
     <EmptyState Icon="history" Title="No transactions yet"
-                Description="Stock adjustments will be logged here as an immutable record.">
+                Description="Stock adjustments, reservations, releases, and transfers will appear here as immutable records.">
         @if (_isAdmin)
         {
             <a class="bl-btn bl-btn-primary" href="/inventory/adjust">
@@ -50,32 +54,41 @@ else if (_transactions.Count == 0)
 }
 else
 {
-    <section class="bl-card">
+    <section class="bl-card" aria-labelledby="history-table-title">
+        <div class="bl-card-head">
+            <h2 id="history-table-title">Newest First</h2>
+            <span class="bl-muted">@_transactions.Count records</span>
+        </div>
         <div class="bl-table-wrap">
             <table class="bl-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
                         <th>Date</th>
-                        <th>Type</th>
                         <th>Blood Type</th>
+                        <th>Type</th>
                         <th>Total Change</th>
                         <th>Reserved Change</th>
+                        <th>Total Before/After</th>
+                        <th>Reserved Before/After</th>
+                        <th>Reason</th>
+                        <th>Reference</th>
+                        <th>Actor</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var transaction in _transactions)
                     {
-                        var totalChange = transaction.TotalUnitsChange;
                         <tr>
-                            <td class="bl-mono">@BloodDisplay.ShortId(transaction.Id)</td>
                             <td class="bl-muted">@BloodDisplay.FormatTimestamp(transaction.CreatedAtUtc)</td>
+                            <td><BloodTypeBadge Value="@transaction.BloodType" /></td>
                             <td class="bl-strong">@BloodDisplay.TransactionTypeLabel(transaction.TransactionType)</td>
-                            <td><BloodTypeBadge Value="transaction.BloodType" /></td>
-                            <td class="@(totalChange > 0 ? "bl-positive" : totalChange < 0 ? "bl-negative" : "bl-muted")">
-                                @(totalChange > 0 ? "+" : "")@totalChange
-                            </td>
-                            <td class="bl-muted">@transaction.ReservedUnitsChange</td>
+                            <td class="@ChangeClass(transaction.TotalUnitsChange)">@Signed(transaction.TotalUnitsChange)</td>
+                            <td class="@ChangeClass(transaction.ReservedUnitsChange)">@Signed(transaction.ReservedUnitsChange)</td>
+                            <td>@(transaction.TotalAfter - transaction.TotalUnitsChange) -> @transaction.TotalAfter</td>
+                            <td>@(transaction.ReservedAfter - transaction.ReservedUnitsChange) -> @transaction.ReservedAfter</td>
+                            <td>@transaction.Reason</td>
+                            <td class="bl-muted">@ReferenceLabel(transaction)</td>
+                            <td class="bl-muted">@transaction.ActorDisplayName</td>
                         </tr>
                     }
                 </tbody>
@@ -110,4 +123,14 @@ else
             _loading = false;
         }
     }
+
+    private static string Signed(int value) => value > 0 ? $"+{value}" : value.ToString();
+
+    private static string ChangeClass(int value) =>
+        value > 0 ? "bl-positive" : value < 0 ? "bl-negative" : "bl-muted";
+
+    private static string ReferenceLabel(InventoryTransactionDto transaction) =>
+        transaction.ReferenceId is null || string.IsNullOrWhiteSpace(transaction.ReferenceType)
+            ? "Manual"
+            : $"{transaction.ReferenceType} {BloodDisplay.ShortId(transaction.ReferenceId.Value)}";
 }

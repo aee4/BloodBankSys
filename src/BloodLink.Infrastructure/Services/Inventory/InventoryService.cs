@@ -1,4 +1,5 @@
 using BloodLink.Application.DTOs;
+using BloodLink.Application.Contracts;
 using BloodLink.Application.Interfaces;
 using BloodLink.Domain.Entities;
 using BloodLink.Domain.Enums;
@@ -25,9 +26,7 @@ public sealed class InventoryService : IInventoryService
 
     public async Task<IReadOnlyList<InventoryItemDto>> GetOwnInventoryAsync(CancellationToken cancellationToken = default)
     {
-        ValidateCurrentUserAuthorization();
-
-        var facilityId = _currentUserService.FacilityId!.Value;
+        var facilityId = await ValidateApprovedFacilityUserAsync(cancellationToken);
 
         var inventory = await _context.BloodInventory
             .Where(bi => bi.FacilityId == facilityId)
@@ -42,18 +41,16 @@ public sealed class InventoryService : IInventoryService
                 bi.TotalUnits,
                 bi.ReservedUnits,
                 bi.AvailableUnits,
-                bi.LowStockThreshold))
+                bi.LowStockThreshold,
+                bi.UpdatedAtUtc,
+                bi.RowVersion))
             .ToList()
             .AsReadOnly();
     }
 
     public async Task AdjustInventoryAsync(InventoryAdjustmentRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateFacilityAdminAuthorization();
-        var facilityId = _currentUserService.FacilityId!.Value;
-
-        // Verify facility is approved
-        var facility = await GetApprovedFacilityAsync(facilityId, cancellationToken);
+        var facilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
 
         // Get or create inventory item
         var inventory = await _context.BloodInventory
@@ -61,7 +58,6 @@ public sealed class InventoryService : IInventoryService
 
         if (inventory == null)
         {
-            // Create new inventory item
             inventory = new BloodInventory
             {
                 Id = Guid.NewGuid(),
@@ -74,6 +70,15 @@ public sealed class InventoryService : IInventoryService
             };
             _context.BloodInventory.Add(inventory);
         }
+        else if (request.RowVersion is { Length: > 0 })
+        {
+            if (!inventory.RowVersion.SequenceEqual(request.RowVersion))
+            {
+                throw new ConcurrencyException("Inventory was modified concurrently. Reload the current values and try again.");
+            }
+
+            _context.Entry(inventory).Property(item => item.RowVersion).OriginalValue = request.RowVersion;
+        }
 
         if (request.TotalUnitsChange == 0)
         {
@@ -85,14 +90,12 @@ public sealed class InventoryService : IInventoryService
             throw new ArgumentException("An inventory adjustment reason is required.", nameof(request));
         }
 
-        // Reserved stock cannot be removed by a total adjustment.
         var newTotal = inventory.TotalUnits + request.TotalUnitsChange;
         if (newTotal < inventory.ReservedUnits)
         {
             throw new InsufficientInventoryException($"Inventory adjustment would reduce total units below reserved units. Total: {inventory.TotalUnits}, Reserved: {inventory.ReservedUnits}, Change: {request.TotalUnitsChange}");
         }
 
-        // Update inventory
         inventory.TotalUnits = newTotal;
         inventory.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -103,7 +106,6 @@ public sealed class InventoryService : IInventoryService
             transactionType = InventoryTransactionType.ManualAdjustment;
         }
 
-        // Create immutable transaction
         var transaction = new InventoryTransaction
         {
             Id = Guid.NewGuid(),
@@ -134,22 +136,33 @@ public sealed class InventoryService : IInventoryService
 
     public async Task<IReadOnlyList<InventoryTransactionDto>> GetTransactionHistoryAsync(CancellationToken cancellationToken = default)
     {
-        ValidateCurrentUserAuthorization();
-
-        var facilityId = _currentUserService.FacilityId!.Value;
+        var facilityId = await ValidateApprovedFacilityUserAsync(cancellationToken);
 
         var transactions = await (
                 from transaction in _context.InventoryTransactions.AsNoTracking()
                 join inventory in _context.BloodInventory.AsNoTracking()
                     on transaction.BloodInventoryId equals inventory.Id
+                join actor in _context.Users.AsNoTracking()
+                    on transaction.PerformedByUserId equals actor.Id into actors
+                from actor in actors.DefaultIfEmpty()
                 where inventory.FacilityId == facilityId
-                orderby transaction.CreatedAtUtc descending
+                orderby transaction.CreatedAtUtc descending, transaction.Id descending
                 select new InventoryTransactionDto(
                     transaction.Id,
                     inventory.BloodType,
                     transaction.TransactionType,
                     transaction.TotalUnitsChange,
                     transaction.ReservedUnitsChange,
+                    transaction.TotalAfter,
+                    transaction.ReservedAfter,
+                    transaction.Reason,
+                    transaction.ReferenceType,
+                    transaction.ReferenceId,
+                    actor == null
+                        ? "System"
+                        : (actor.FirstName + " " + actor.LastName).Trim() == ""
+                            ? actor.Email ?? actor.UserName ?? "User"
+                            : (actor.FirstName + " " + actor.LastName).Trim(),
                     transaction.CreatedAtUtc))
             .ToListAsync(cancellationToken);
 
@@ -158,9 +171,7 @@ public sealed class InventoryService : IInventoryService
 
     public async Task<IReadOnlyList<LowStockAlertDto>> GetLowStockAlertsAsync(LowStockQueryRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateCurrentUserAuthorization();
-
-        var facilityId = _currentUserService.FacilityId!.Value;
+        var facilityId = await ValidateApprovedFacilityUserAsync(cancellationToken);
 
         var lowStockItems = await _context.BloodInventory
             .Where(bi => bi.FacilityId == facilityId && bi.TotalUnits - bi.ReservedUnits <= bi.LowStockThreshold)
@@ -180,28 +191,28 @@ public sealed class InventoryService : IInventoryService
 
     public async Task<IReadOnlyList<AvailabilityResultDto>> SearchAvailabilityAsync(AvailabilitySearchRequest request, CancellationToken cancellationToken = default)
     {
-        ValidateFacilityAdminAuthorization();
-
-        var requestingFacilityId = _currentUserService.FacilityId!.Value;
-
-        // Verify requesting facility is approved
-        await GetApprovedFacilityAsync(requestingFacilityId, cancellationToken);
+        var requestingFacilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
+        var minimumAvailable = Math.Max(request.MinimumAvailableUnits, 1);
 
         var availabilityResults = await (
                 from inventory in _context.BloodInventory.AsNoTracking()
                 join facility in _context.Facilities.AsNoTracking()
                     on inventory.FacilityId equals facility.Id
                 where inventory.BloodType == request.BloodType
-                    && inventory.TotalUnits - inventory.ReservedUnits >= request.MinimumAvailableUnits
+                    && inventory.TotalUnits - inventory.ReservedUnits >= minimumAvailable
+                    && inventory.TotalUnits - inventory.ReservedUnits > 0
                     && inventory.FacilityId != requestingFacilityId
                     && facility.Status == FacilityStatus.Approved
+                orderby inventory.TotalUnits - inventory.ReservedUnits descending, facility.Name
                 select new AvailabilityResultDto(
                     facility.Id,
                     facility.Name,
                     facility.FacilityType,
+                    facility.Region,
                     facility.City,
                     inventory.BloodType,
-                    inventory.TotalUnits - inventory.ReservedUnits))
+                    inventory.TotalUnits - inventory.ReservedUnits,
+                    inventory.UpdatedAtUtc))
             .ToListAsync(cancellationToken);
 
         return availabilityResults.AsReadOnly();
@@ -466,6 +477,29 @@ public sealed class InventoryService : IInventoryService
         {
             throw new Domain.Exceptions.UnauthorizedAccessException("Only FacilityAdmin users can perform this operation.");
         }
+    }
+
+    private async Task<Guid> ValidateApprovedFacilityUserAsync(CancellationToken cancellationToken)
+    {
+        ValidateCurrentUserAuthorization();
+
+        if (!_currentUserService.IsInRole(RoleNames.FacilityAdmin) &&
+            !_currentUserService.IsInRole(RoleNames.FacilityStaff))
+        {
+            throw new Domain.Exceptions.UnauthorizedAccessException("Only approved facility users can perform this operation.");
+        }
+
+        var facilityId = _currentUserService.FacilityId!.Value;
+        await GetApprovedFacilityAsync(facilityId, cancellationToken);
+        return facilityId;
+    }
+
+    private async Task<Guid> ValidateFacilityAdminAuthorizationAsync(CancellationToken cancellationToken)
+    {
+        ValidateFacilityAdminAuthorization();
+        var facilityId = _currentUserService.FacilityId!.Value;
+        await GetApprovedFacilityAsync(facilityId, cancellationToken);
+        return facilityId;
     }
 
     private async Task<Facility> GetApprovedFacilityAsync(Guid facilityId, CancellationToken cancellationToken)

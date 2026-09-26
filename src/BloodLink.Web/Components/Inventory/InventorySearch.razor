@@ -1,10 +1,8 @@
 @page "/inventory/search"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IInventoryService Inventory
-@inject IBloodRequestService Requests
-@inject IBloodNeedService Needs
 @inject ICurrentUserService CurrentUser
 
 <PageTitle>Network Blood Search | BloodLink</PageTitle>
@@ -18,26 +16,14 @@
 <div class="bl-dash-header">
     <div>
         <h1 class="bl-dash-title">Network Blood Search</h1>
-        <p class="bl-dash-subtitle">Find available blood at other approved facilities</p>
+        <p class="bl-dash-subtitle">Find exact blood-type availability at other approved facilities</p>
     </div>
 </div>
 
 @if (_error == "no-access")
 {
     <AlertMessage Variant="danger" Title="No access">
-        <span>Only facility administrators can search the network. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
-    </AlertMessage>
-}
-else if (_error == "load")
-{
-    <AlertMessage Variant="danger" Title="Couldn't run the search">
-        <span>We couldn't search the network right now. Please try again later.</span>
-    </AlertMessage>
-}
-else if (_error == "invalid")
-{
-    <AlertMessage Variant="danger" Title="Select a blood type">
-        <span>Please choose a blood type before searching.</span>
+        <span>Only active facility administrators can search the network. <a class="bl-inline-link" href="/inventory">View inventory</a>.</span>
     </AlertMessage>
 }
 else
@@ -45,38 +31,45 @@ else
     <section class="bl-card bl-card-pad bl-search-card">
         <div class="bl-search-form">
             <div class="bl-field">
-                <label class="bl-label" for="search-blood-type">Blood Type</label>
+                <label class="bl-label" for="search-blood-type">Blood Type <span>*</span></label>
                 <InputSelect id="search-blood-type" class="bl-input bl-select" @bind-Value="_bloodType">
                     <option value="">Select blood type</option>
                     @foreach (var type in BloodTypes)
                     {
-                        <option value="@type.Value">@type.Label</option>
+                        <option value="@type">@BloodDisplay.BloodTypeLabel(type)</option>
                     }
                 </InputSelect>
             </div>
             <div class="bl-field bl-search-min">
-                <label class="bl-label" for="search-min-units">Min. Available Units</label>
-                <InputNumber id="search-min-units" class="bl-input" @bind-Value="_minUnits" placeholder="e.g. 4" />
+                <label class="bl-label" for="search-min-units">Minimum Available Units</label>
+                <InputNumber id="search-min-units" class="bl-input" @bind-Value="_minUnits" min="1" placeholder="e.g. 4" />
             </div>
             <button class="bl-btn bl-btn-primary bl-search-submit" type="button" @onclick="SearchAsync" disabled="@_busy">
                 @if (_busy) { <AppIcon Name="loader" Size="14" Class="bl-spin" /> <span>Searching...</span> }
                 else { <AppIcon Name="search" Size="14" /> <span>Search Network</span> }
             </button>
         </div>
+        @if (_message is { Length: > 0 })
+        {
+            <AlertMessage Variant="@_messageVariant" Title="@_messageTitle">
+                <span>@_message</span>
+            </AlertMessage>
+        }
     </section>
 
     @if (_searched && _bloodType is { } selected)
     {
         @if (_results.Count == 0)
         {
-            <EmptyState Icon="search" Title="No matches found"
-                        Description="@($"No approved facilities currently have {BloodDisplay.BloodTypeLabel(selected)} units available.")" />
+            <EmptyState Icon="search" Title="No eligible facilities found"
+                        Description="@($"No approved external facility currently has available {BloodDisplay.BloodTypeLabel(selected)} units matching this exact-type search.")" />
         }
         else
         {
-            <section class="bl-card">
-                <div class="bl-search-results-head">
-                    <p>Found <strong>@_results.Count facilities</strong> with available @BloodDisplay.BloodTypeLabel(selected) units</p>
+            <section class="bl-card" aria-labelledby="search-results-title">
+                <div class="bl-card-head">
+                    <h2 id="search-results-title">Exact-Type Results</h2>
+                    <span class="bl-muted">@_results.Count eligible facilities</span>
                 </div>
                 <div class="bl-table-wrap">
                     <table class="bl-table">
@@ -84,9 +77,11 @@ else
                             <tr>
                                 <th>Facility</th>
                                 <th>Type</th>
-                                <th>City</th>
+                                <th>Location</th>
+                                <th>Blood Type</th>
                                 <th>Available Units</th>
-                                <th>Action</th>
+                                <th>Last Updated</th>
+                                <th>Next Step</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -95,91 +90,20 @@ else
                                 <tr>
                                     <td class="bl-strong">@result.FacilityName</td>
                                     <td class="bl-muted">@BloodDisplay.FacilityTypeLabel(result.FacilityType)</td>
-                                    <td class="bl-muted">@result.City</td>
-                                    <td><span class="bl-avail-lg">@result.AvailableUnits</span> <span class="bl-muted">units</span></td>
-                                    <td>
-                                        @if (_searchingNeeds.Count > 0)
-                                        {
-                                            <button class="bl-btn-sm" type="button" @onclick='() => BeginRequest(result)'>
-                                                <AppIcon Name="send" Size="12" /> Request Blood
-                                            </button>
-                                        }
-                                        else
-                                        {
-                                            <span class="bl-muted" title="You need a need in Searching status to send a request">No searching need</span>
-                                        }
-                                    </td>
+                                    <td class="bl-muted">@Location(result)</td>
+                                    <td><BloodTypeBadge Value="@result.BloodType" /></td>
+                                    <td><span class="bl-avail-lg">@result.AvailableUnits</span> <span class="bl-muted">available</span></td>
+                                    <td class="bl-muted">@BloodDisplay.FormatTimestamp(result.UpdatedAtUtc)</td>
+                                    <td><span class="bl-muted">Request workflow is Phase 5C</span></td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
-                @if (_searchingNeeds.Count == 0)
-                {
-                    <p class="bl-search-note">Requests are created from a blood need in <strong>Searching</strong> status. Start a search from your <a class="bl-inline-link" href="/needs">needs</a> first.</p>
-                }
+                <p class="bl-search-note">Search is exact blood type only. Reserved stock is excluded from available units. Creating external requests is not part of Phase 5B.</p>
             </section>
         }
     }
-}
-
-@if (_requestTarget is not null)
-{
-    <div class="bl-modal-backdrop">
-        <div class="bl-modal">
-            <h3 class="bl-card-title">Request Blood from @_requestTarget.FacilityName</h3>
-            <p class="bl-card-desc">Send a request for @UnitsLabel from this facility using one of your searching needs.</p>
-
-            <label class="bl-label" for="req-need">Blood need to fulfil <span>*</span></label>
-            <InputSelect id="req-need" class="bl-input bl-select" @bind-Value="_selectedNeedId">
-                <option value="">Select a searching need</option>
-                @foreach (var need in _searchingNeeds)
-                {
-                    <option value="@need.Id">
-                        @BloodDisplay.BloodTypeLabel(need.BloodType) · @need.UnitsNeeded units (@BloodDisplay.ShortId(need.Id))
-                    </option>
-                }
-            </InputSelect>
-
-            <label class="bl-label" for="req-units">Units requested <span>*</span></label>
-            <InputNumber id="req-units" class="bl-input" @bind-Value="_requestUnits" min="1"
-                         max="@(SelectedNeed?.UnitsNeeded ?? 1)" placeholder="e.g. 4" />
-            @if (SelectedNeed is not null)
-            {
-                <p class="bl-field-hint">At most @SelectedNeed.UnitsNeeded units for this need.</p>
-            }
-
-            <label class="bl-label" for="req-note">Request note (optional)</label>
-            <InputTextArea id="req-note" class="bl-input" @bind-Value="_requestNote" rows="2"
-                           placeholder="e.g. urgent surgical case" />
-
-            @if (_requestBusy)
-            {
-                <LoadingState Message="Sending request..." />
-            }
-            @if (!string.IsNullOrEmpty(_requestError))
-            {
-                <AlertMessage Variant="danger" Title="Couldn't send request">
-                    <span>@_requestError</span>
-                </AlertMessage>
-            }
-            @if (_requestSent)
-            {
-                <AlertMessage Variant="success" Title="Request sent">
-                    <span>Your facility admin will be notified of the response.</span>
-                </AlertMessage>
-            }
-
-            <div class="bl-confirm-actions">
-                <button class="bl-btn bl-btn-outline" type="button" @onclick="CancelRequest">Cancel</button>
-                <button class="bl-btn bl-btn-primary" type="button" @onclick="SendRequestAsync"
-                        disabled='@(_requestBusy || !_requestSent && (_selectedNeedId is null || _requestUnits <= 0))'>
-                    @if (_requestSent) { <AppIcon Name="check" Size="14" /> <span>Done</span> }
-                    else { <AppIcon Name="send" Size="14" /> <span>Send Request</span> }
-                </button>
-            </div>
-        </div>
-    </div>
 }
 
 @code {
@@ -188,53 +112,27 @@ else
     private bool _busy;
     private bool _searched;
     private string? _error;
+    private string? _message;
+    private string _messageTitle = "Check the search";
+    private string _messageVariant = "danger";
     private IReadOnlyList<AvailabilityResultDto> _results = [];
-    private IReadOnlyList<BloodNeedDto> _searchingNeeds = [];
 
-    private AvailabilityResultDto? _requestTarget;
-    private Guid? _selectedNeedId;
-    private int _requestUnits = 1;
-    private string? _requestNote;
-    private bool _requestBusy;
-    private string? _requestError;
-    private bool _requestSent;
+    private static readonly BloodType[] BloodTypes = Enum.GetValues<BloodType>();
 
-    private BloodNeedDto? SelectedNeed => _searchingNeeds.FirstOrDefault(need => need.Id == _selectedNeedId);
-
-    private string UnitsLabel => _bloodType is { } type
-        ? BloodDisplay.BloodTypeLabel(type)
-        : "blood";
-
-    private static readonly (BloodType Value, string Label)[] BloodTypes =
-        Enum.GetValues<BloodType>().Select(value => (value, BloodDisplay.BloodTypeLabel(value))).ToArray();
-
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
         if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
         {
             _error = "no-access";
-            return;
-        }
-
-        try
-        {
-            _searchingNeeds = (await Needs.ListOwnFacilityAsync()).Where(need => need.Status == BloodNeedStatus.Searching).ToList();
-        }
-        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
-        {
-            _error = "no-access";
-        }
-        catch (Exception)
-        {
-            _searchingNeeds = [];
         }
     }
 
     private async Task SearchAsync()
     {
+        _message = null;
         if (_bloodType is not { } selected)
         {
-            _error = "invalid";
+            SetMessage("Please choose one canonical blood type before searching.", "danger", "Blood type required");
             return;
         }
 
@@ -243,7 +141,7 @@ else
         try
         {
             _results = await Inventory.SearchAvailabilityAsync(
-                new AvailabilitySearchRequest(selected, Math.Max(_minUnits ?? 0, 1)));
+                new AvailabilitySearchRequest(selected, Math.Max(_minUnits ?? 1, 1)));
             _searched = true;
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
@@ -252,7 +150,7 @@ else
         }
         catch (Exception)
         {
-            _error = "load";
+            SetMessage("We couldn't search the network right now. Please try again later.", "danger", "Search failed");
         }
         finally
         {
@@ -260,55 +158,15 @@ else
         }
     }
 
-    private void BeginRequest(AvailabilityResultDto result)
+    private void SetMessage(string message, string variant, string title)
     {
-        _requestTarget = result;
-        _selectedNeedId = _searchingNeeds.FirstOrDefault(need => need.BloodType == result.BloodType)?.Id;
-        var match = _searchingNeeds.FirstOrDefault(need => need.Id == _selectedNeedId);
-        _requestUnits = match?.UnitsNeeded ?? 1;
-        _requestNote = null;
-        _requestError = null;
-        _requestSent = false;
+        _message = message;
+        _messageVariant = variant;
+        _messageTitle = title;
     }
 
-    private void CancelRequest()
-    {
-        _requestTarget = null;
-        _selectedNeedId = null;
-        _requestNote = null;
-        _requestError = null;
-        _requestSent = false;
-    }
-
-    private async Task SendRequestAsync()
-    {
-        if (_requestTarget is null || _selectedNeedId is not { } needId)
-        {
-            return;
-        }
-
-        _requestBusy = true;
-        _requestError = null;
-        try
-        {
-            await Requests.CreateFromNeedAsync(new CreateBloodRequestRequest(
-                needId,
-                _requestTarget.FacilityId,
-                Math.Max(_requestUnits, 1),
-                _requestNote));
-            _requestSent = true;
-        }
-        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
-        {
-            _requestError = "You are not authorized to create requests.";
-        }
-        catch (Exception ex)
-        {
-            _requestError = ex.Message;
-        }
-        finally
-        {
-            _requestBusy = false;
-        }
-    }
+    private static string Location(AvailabilityResultDto result) =>
+        string.IsNullOrWhiteSpace(result.Region)
+            ? result.City
+            : $"{result.City}, {result.Region}";
 }

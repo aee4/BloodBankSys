@@ -1,6 +1,7 @@
 using System.Net;
 using BloodLink.Application.Contracts;
 using BloodLink.Web.Components.Facility;
+using BloodLink.Web.Components.Inventory;
 using BloodLink.Web.Components.Requests;
 using BloodLink.Web.Components.Staff;
 using BloodLink.Web.Components.SystemAdmin;
@@ -33,6 +34,15 @@ public sealed class RouteContractTests
         {
             ["/system/facilities"] = typeof(SystemFacilities),
             ["/system/facilities/{Id:guid}"] = typeof(SystemFacilityDetail)
+        };
+
+    private static readonly IReadOnlyDictionary<string, string> InventoryRoutePolicies =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["/inventory"] = AuthorizationPolicies.RequireApprovedFacilityUser,
+            ["/inventory/history"] = AuthorizationPolicies.RequireApprovedFacilityUser,
+            ["/inventory/adjust"] = AuthorizationPolicies.RequireFacilityAdmin,
+            ["/inventory/search"] = AuthorizationPolicies.RequireFacilityAdmin
         };
 
     [Fact]
@@ -78,6 +88,26 @@ public sealed class RouteContractTests
                 .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
                 .Cast<AuthorizeAttribute>());
             Assert.Equal(AuthorizationPolicies.RequireSystemAdmin, authorization.Policy);
+        }
+    }
+
+    [Fact]
+    public void Inventory_routes_have_one_owner_and_expected_operational_policies()
+    {
+        var routedComponents = typeof(Inventory).Assembly.DefinedTypes
+            .SelectMany(type => type.GetCustomAttributes(typeof(RouteAttribute), inherit: false)
+                .Cast<RouteAttribute>()
+                .Select(route => (route.Template, Component: type.AsType())))
+            .ToList();
+
+        foreach (var (route, expectedPolicy) in InventoryRoutePolicies)
+        {
+            var registration = Assert.Single(routedComponents, item => item.Template == route);
+            var authorization = Assert.Single(registration.Component
+                .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>());
+
+            Assert.Equal(expectedPolicy, authorization.Policy);
         }
     }
 
