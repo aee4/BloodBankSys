@@ -119,6 +119,28 @@ public sealed class StaffServiceTests
     }
 
     [Fact]
+    public async Task ResetTemporaryPasswordAsync_DeliveryFailureDoesNotPersistAccountChanges()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var delivery = new FakePasswordResetDelivery();
+        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), delivery);
+        var staff = await service.CreateStaffAsync(CreateRequest());
+        var user = dbContext.Users.Single(item => item.Id == staff.UserId);
+        user.MustChangePassword = false;
+        user.SecurityStamp = "known-stamp";
+        await dbContext.SaveChangesAsync();
+        delivery.Fail = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ResetTemporaryPasswordAsync(staff.UserId));
+
+        dbContext.ChangeTracker.Clear();
+        var savedUser = dbContext.Users.Single(item => item.Id == staff.UserId);
+        Assert.False(savedUser.MustChangePassword);
+        Assert.Equal("known-stamp", savedUser.SecurityStamp);
+        Assert.Empty(dbContext.AuditLogs.Where(log => log.Action == "StaffPasswordReset"));
+    }
+
+    [Fact]
     public async Task CreateStaffAsync_RequiresConfiguredCredentialDelivery()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();

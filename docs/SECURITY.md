@@ -86,6 +86,8 @@ Delivery is behind `BloodLink.Application.Security.IPasswordResetDelivery`. The 
 
 **Production email integration still required:** register an actual delivery implementation after infrastructure registration, set `IsConfigured` accurately, and set `Account__PublicOrigin=https://your-approved-host`. Use a trusted provider and externally stored credentials. Configure provider timeouts, monitor queue/processing failures, and avoid logging message bodies or reset URLs. No SMTP credentials, real messages, public token viewer or token log has been added. Staff creation and staff credential reset now use the same reset-link delivery boundary and fail closed when delivery is disabled or the public origin is invalid.
 
+Phase 5A acceptance uses split evidence: browser verification proves production-style disabled-delivery behavior, rollback, and safe UI messaging; controlled fake-delivery tests prove the successful staff setup/reset path without registering a production provider. Complete live delivery through a real provider remains Phase 6 work.
+
 The app does not log passwords or reset tokens. Operators must also disable/redact account request bodies and reset query strings in reverse-proxy, tracing and access logs. Do not enable verbose request logging on production account routes. Reset links are credentials until used or expired.
 
 ## Cookies and Interactive Server revalidation
