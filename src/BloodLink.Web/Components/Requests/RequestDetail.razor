@@ -1,10 +1,10 @@
 @page "/requests/{Id:guid}"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IBloodRequestService Requests
+@inject IInventoryService Inventory
 @inject ICurrentUserService CurrentUser
-@inject NavigationManager Nav
 
 <PageTitle>Request @BloodDisplay.ShortId(Id) | BloodLink</PageTitle>
 
@@ -12,289 +12,235 @@
 {
     <LoadingState Message="Loading request..." />
 }
-else if (_error == "no-access")
+else if (_notFound)
 {
-    <AlertMessage Variant="danger" Title="No access">
-        <span>Only facility administrators can view blood requests.</span>
-    </AlertMessage>
-}
-else if (_error == "not-found")
-{
-    <EmptyState Icon="search" Title="Request not found"
-                Description="This request may have been removed, or you don't have access to it.">
-        <a class="bl-btn bl-btn-outline" href="/requests/sent">Back to Requests Sent</a>
+    <EmptyState Icon="search" Title="Request not found" Description="This request could not be found or you do not have access to it.">
+        <a class="bl-btn bl-btn-outline" href="@BackHref">Back to requests</a>
     </EmptyState>
 }
-else if (_request is null)
+else if (_error is not null || _request is null)
 {
-    <AlertMessage Variant="danger" Title="Couldn't load request">
-        <span>We couldn't load this request right now. Please try again later.</span>
-    </AlertMessage>
+    <AlertMessage Variant="danger" Title="Could not load request"><span>@(_error ?? "Refresh and try again.")</span></AlertMessage>
 }
 else
 {
-    <nav class="bl-breadcrumb">
-        <a href="/requests/@(_isSource ? "received" : "sent")">Requests @(_isSource ? "Received" : "Sent")</a>
-        <AppIcon Name="chevron-right" Size="12" />
-        <span>@BloodDisplay.ShortId(Id)</span>
+    <nav class="bl-breadcrumb" aria-label="Breadcrumb">
+        <a href="@BackHref">Requests @(IsSource ? "Received" : "Sent")</a><AppIcon Name="chevron-right" Size="12" /><span>@BloodDisplay.ShortId(Id)</span>
     </nav>
+    @if (_actionError is not null) { <AlertMessage Variant="danger" Title="Request unchanged"><span>@_actionError</span></AlertMessage> }
+    @if (_success is not null) { <AlertMessage Variant="success" Title="Request updated"><span>@_success</span></AlertMessage> }
 
-    <section class="bl-card bl-card-pad">
-        <div class="bl-detail-header">
-            <div>
-                <h1 class="bl-dash-title">Request @BloodDisplay.ShortId(Id)</h1>
-                <p class="bl-dash-subtitle">Blood request between facilities</p>
-            </div>
-            <span class="bl-status-badge bl-status-@BloodDisplay.BloodRequestStatusTone(_request.Status)">
-                @BloodDisplay.BloodRequestStatusLabel(_request.Status)
-            </span>
-        </div>
+    <div class="bl-detail-grid">
+        <main class="bl-detail-main">
+            <section class="bl-card bl-card-pad">
+                <div class="bl-detail-head">
+                    <div><h1 class="bl-detail-title">Request @BloodDisplay.ShortId(_request.Id)</h1><p class="bl-detail-sub">@_request.RequestingFacilityName to @_request.SourceFacilityName</p></div>
+                    <span class="bl-status-badge bl-status-@BloodDisplay.BloodRequestStatusTone(_request.Status)">@BloodDisplay.BloodRequestStatusLabel(_request.Status)</span>
+                </div>
+                <dl class="bl-detail-facts">
+                    <div><dt class="bl-detail-label">Requesting facility</dt><dd>@_request.RequestingFacilityName</dd></div>
+                    <div><dt class="bl-detail-label">Source facility</dt><dd>@_request.SourceFacilityName</dd></div>
+                    <div><dt class="bl-detail-label">Linked need</dt><dd>Need @BloodDisplay.ShortId(_request.BloodNeedId)</dd></div>
+                    <div><dt class="bl-detail-label">Blood type</dt><dd><BloodTypeBadge Value="_request.BloodType" /></dd></div>
+                    <div><dt class="bl-detail-label">Units requested</dt><dd>@_request.UnitsRequested</dd></div>
+                    <div><dt class="bl-detail-label">Units accepted</dt><dd>@(_request.UnitsAccepted?.ToString() ?? "-")</dd></div>
+                    <div><dt class="bl-detail-label">Need urgency</dt><dd>@BloodDisplay.UrgencyLabel(_request.Priority)</dd></div>
+                    <div><dt class="bl-detail-label">Current source availability</dt><dd>@(_sourceAvailable?.ToString() ?? "Unavailable")</dd></div>
+                    <div><dt class="bl-detail-label">Created</dt><dd>@BloodDisplay.FormatTimestamp(_request.CreatedAtUtc)</dd></div>
+                    <div><dt class="bl-detail-label">Responded</dt><dd>@DateLabel(_request.RespondedAtUtc)</dd></div>
+                    <div><dt class="bl-detail-label">Completed</dt><dd>@DateLabel(_request.FulfilledAtUtc)</dd></div>
+                </dl>
+                @if (!string.IsNullOrWhiteSpace(_request.RequestNote)) { <div class="bl-detail-context"><h2 class="bl-card-title">Request note</h2><p>@_request.RequestNote</p></div> }
+                @if (!string.IsNullOrWhiteSpace(_request.ResponseNote)) { <div class="bl-detail-context"><h2 class="bl-card-title">Response note</h2><p>@_request.ResponseNote</p></div> }
 
-        <div class="bl-detail-grid">
-            <div>
-                <p class="bl-label-optional">From Facility</p>
-                <p class="bl-strong">Facility @BloodDisplay.ShortId(_request.RequestingFacilityId)</p>
-            </div>
-            <div>
-                <p class="bl-label-optional">To Facility</p>
-                <p class="bl-strong">Facility @BloodDisplay.ShortId(_request.SourceFacilityId)</p>
-            </div>
-            <div>
-                <p class="bl-label-optional">Blood Type</p>
-                <BloodTypeBadge Value="_request.BloodType" />
-            </div>
-            <div>
-                <p class="bl-label-optional">Units Requested</p>
-                <p class="bl-strong">@_request.UnitsRequested</p>
-            </div>
-            <div>
-                <p class="bl-label-optional">Units Accepted</p>
-                <p class="bl-strong">@(_request.UnitsAccepted?.ToString() ?? "—")</p>
-            </div>
-            <div>
-                <p class="bl-label-optional">Linked Need</p>
-                <a class="bl-inline-link" href="/needs/@_request.BloodNeedId">Need @BloodDisplay.ShortId(_request.BloodNeedId)</a>
-            </div>
-        </div>
-
-        @if (_canAccept || _canReject || _canFulfil || _canCancel)
-        {
-            <div class="bl-action-row bl-action-row-top">
-                @if (_canAccept)
+                @if (IsSource && HasActions)
                 {
-                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("accept")'>
-                        <AppIcon Name="circle-check" Size="14" /> Accept
-                    </button>
+                    <section class="bl-detail-context" aria-labelledby="request-actions-title">
+                        <h2 id="request-actions-title" class="bl-card-title">Source facility actions</h2>
+                        @if (_confirming is not null)
+                        {
+                            <div class="bl-confirm-box" role="group" aria-label="Confirm request transition">
+                                <p class="bl-card-desc">@ActionExplanation</p>
+                                @if (_confirming == "accept")
+                                {
+                                    <label class="bl-label" for="detail-accepted-units">Units to accept <span>*</span></label>
+                                    <InputNumber id="detail-accepted-units" class="bl-input" @bind-Value="_unitsAccepted" min="1" max="@Math.Min(_request.UnitsRequested, _sourceAvailable ?? 0)" />
+                                    <p class="bl-field-hint">Accept no more than requested or currently available. This amount will be reserved.</p>
+                                }
+                                @if (_confirming == "reject")
+                                {
+                                    <label class="bl-label" for="detail-response-note">Rejection reason <span>*</span></label>
+                                    <InputTextArea id="detail-response-note" class="bl-input bl-textarea" @bind-Value="_note" rows="3" maxlength="1000" />
+                                }
+                                @if (_confirming == "accept" || _confirming == "fulfil")
+                                {
+                                    <label class="bl-label" for="detail-optional-note">@(_confirming == "fulfil" ? "Handover note (optional)" : "Response note (optional)")</label>
+                                    <InputText id="detail-optional-note" class="bl-input" @bind-Value="_note" maxlength="1000" />
+                                }
+                                <div class="bl-confirm-actions">
+                                    <button class="bl-btn bl-btn-outline" type="button" @onclick="ClearConfirmation" disabled="@_busy">Back</button>
+                                    <button class="bl-btn bl-btn-primary" type="button" @onclick="SubmitAsync" disabled="@(!CanSubmit)">@(_busy ? "Saving..." : "Confirm")</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="bl-action-row">
+                                @if (_request.Status == BloodRequestStatus.Sent)
+                                {
+                                    <button class="bl-btn bl-btn-primary" type="button" @onclick='() => Begin("accept")' disabled="@(_busy || _sourceAvailable is null or 0)">Accept</button>
+                                    <button class="bl-btn bl-btn-outline" type="button" @onclick='() => Begin("reject")' disabled="@_busy">Reject</button>
+                                    <button class="bl-btn bl-btn-outline" type="button" @onclick='() => Begin("cancel")' disabled="@_busy">Cancel request</button>
+                                }
+                                else if (_request.Status == BloodRequestStatus.Accepted)
+                                {
+                                    <button class="bl-btn bl-btn-primary" type="button" @onclick='() => Begin("fulfil")' disabled="@_busy">Confirm handover and fulfil</button>
+                                    <button class="bl-btn bl-btn-outline" type="button" @onclick='() => Begin("cancel")' disabled="@_busy">Cancel request</button>
+                                }
+                            </div>
+                        }
+                    </section>
                 }
-                @if (_canReject)
-                {
-                    <button class="bl-btn bl-btn-sm" type="button" @onclick='() => Begin("reject")'>
-                        <AppIcon Name="x-circle" Size="14" /> Reject
-                    </button>
-                }
-                @if (_canFulfil)
-                {
-                    <button class="bl-btn bl-btn-sm bl-btn-success" type="button" @onclick='() => Begin("fulfil")'>
-                        <AppIcon Name="circle-check" Size="14" /> Mark as Fulfilled
-                    </button>
-                }
-                @if (_canCancel)
-                {
-                    <button class="bl-btn bl-btn-sm bl-btn-outline" type="button" @onclick='() => Begin("cancel")'>
-                        <AppIcon Name="circle-alert" Size="14" /> Cancel Request
-                    </button>
-                }
-            </div>
-        }
-    </section>
-
-    @if (_saved is { Length: > 0 } saved)
-    {
-        <AlertMessage Variant="success" Title="Done">
-            <span>@saved</span>
-        </AlertMessage>
-    }
-}
-
-@if (_confirming is not null && _request is not null)
-{
-    <div class="bl-modal-backdrop">
-        <div class="bl-modal">
-            <h3 class="bl-card-title">
-                @(_confirming switch
-                {
-                    "accept" => "Accept Request",
-                    "reject" => "Reject Request",
-                    "fulfil" => "Mark Request as Fulfilled",
-                    _ => "Cancel Request"
-                })
-            </h3>
-            <p class="bl-card-desc">
-                @(_confirming switch
-                {
-                    "accept" => "Accepting will reserve the requested units against your available inventory.",
-                    "reject" => "Rejecting will notify the requesting facility immediately.",
-                    "fulfil" => "Confirm that the blood units have been handed over and the request is complete.",
-                    _ => "The other facility will be notified that the request was cancelled."
-                })
-            </p>
-
-            @if (_confirming == "accept")
+            </section>
+        </main>
+        <aside class="bl-card bl-card-pad bl-detail-aside" aria-labelledby="request-timeline-title">
+            <h2 id="request-timeline-title" class="bl-card-title">Request timeline</h2>
+            @if (_timeline.Count == 0) { <p class="bl-muted">No persisted request history is available.</p> }
+            else
             {
-                <label class="bl-label" for="req-accept-units">Units to accept</label>
-                <InputNumber id="req-accept-units" class="bl-input" @bind-Value="_unitsAccepted" min="1" max="@_request.UnitsRequested" />
-                <p class="bl-field-hint">Between 1 and @_request.UnitsRequested.</p>
+                <ol class="bl-timeline">
+                    @foreach (var item in _timeline)
+                    {
+                        <li class="bl-timeline-item">
+                            <span class="bl-timeline-dot"></span><div>
+                                <p class="bl-timeline-event">@(item.FromStatus is null ? "Created" : BloodDisplay.BloodRequestStatusLabel(item.FromStatus.Value)) <span aria-hidden="true">&rarr;</span> @BloodDisplay.BloodRequestStatusLabel(item.ToStatus)</p>
+                                <p class="bl-timeline-time">@BloodDisplay.FormatTimestamp(item.ChangedAtUtc) by @item.ActorDisplayName</p>
+                                @if (!string.IsNullOrWhiteSpace(item.Note)) { <p>@item.Note</p> }
+                            </div>
+                        </li>
+                    }
+                </ol>
             }
-            @if (_confirming == "reject" || _confirming == "cancel")
-            {
-                <label class="bl-label" for="req-reason">@(_confirming == "reject" ? "Rejection reason" : "Cancellation reason") <span>*</span></label>
-                <InputTextArea id="req-reason" class="bl-input" @bind-Value="_note" rows="3"
-                               placeholder='@(_confirming == "reject" ? "Required — explain why the request is rejected" : "Required — explain why the request is cancelled")' />
-            }
-            @if (_confirming == "fulfil")
-            {
-                <label class="bl-label" for="req-note">Handover note (optional)</label>
-                <InputTextArea id="req-note" class="bl-input" @bind-Value="_note" rows="2" placeholder="Optional handover reference" />
-            }
-
-            @if (_busy)
-            {
-                <LoadingState Message="Submitting..." />
-            }
-            @if (!string.IsNullOrEmpty(_actionError))
-            {
-                <AlertMessage Variant="danger" Title="Couldn't update request">
-                    <span>@_actionError</span>
-                </AlertMessage>
-            }
-
-            <div class="bl-confirm-actions">
-                <button class="bl-btn bl-btn-outline" type="button" @onclick="ResetConfirm">Cancel</button>
-                <button class="bl-btn @(_confirming == "accept" || _confirming == "fulfil" ? "bl-btn-primary" : "bl-btn-danger")" type="button"
-                        @onclick="ConfirmAsync"
-                        disabled='@(_busy || ((_confirming == "reject" || _confirming == "cancel") && string.IsNullOrWhiteSpace(_note)))'>
-                    Confirm
-                </button>
-            </div>
-        </div>
+        </aside>
     </div>
 }
 
 @code {
     [Parameter] public Guid Id { get; set; }
-
     private bool _loading = true;
-    private string? _error;
+    private bool _notFound;
+    private bool _busy;
+    private bool IsSource => _request is not null && CurrentUser.FacilityId == _request.SourceFacilityId;
+    private bool HasActions => _request?.Status is BloodRequestStatus.Sent or BloodRequestStatus.Accepted;
+    private string BackHref => IsSource ? "/requests/received" : "/requests/sent";
+    private bool CanSubmit => !_busy && _request is not null && _confirming switch
+    {
+        "accept" => _unitsAccepted > 0 && _unitsAccepted <= _request.UnitsRequested && _unitsAccepted <= (_sourceAvailable ?? 0),
+        "reject" => !string.IsNullOrWhiteSpace(_note),
+        "cancel" or "fulfil" => true,
+        _ => false
+    };
+    private string ActionExplanation => _confirming switch
+    {
+        "accept" => $"Accepting {_unitsAccepted} units reserves exactly that quantity.",
+        "reject" => "The requester will be notified. No inventory changes occur.",
+        "fulfil" => $"Confirm handover: exactly {_request?.UnitsAccepted ?? 0} accepted units will transfer.",
+        "cancel" when _request?.Status == BloodRequestStatus.Accepted => $"Cancelling releases exactly {_request.UnitsAccepted} reserved units; total stock is unchanged.",
+        _ => "A sent request has no reservation to release."
+    };
     private BloodRequestDto? _request;
-    private bool _isSource;
+    private IReadOnlyList<RequestTimelineItemDto> _timeline = [];
+    private string? _error;
+    private string? _actionError;
+    private string? _success;
     private string? _confirming;
     private string? _note;
     private int _unitsAccepted;
-    private bool _busy;
-    private string? _actionError;
-    private string? _saved;
+    private int? _sourceAvailable;
 
-    private bool _canAccept => _isSource && _request is { Status: BloodRequestStatus.Sent };
-    private bool _canReject => _isSource && _request is { Status: BloodRequestStatus.Sent };
-    private bool _canFulfil => _isSource && _request is { Status: BloodRequestStatus.Accepted };
-    private bool _canCancel => _isSource && _request is { Status: BloodRequestStatus.Sent or BloodRequestStatus.Accepted };
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
 
-    protected override async Task OnInitializedAsync()
+    private async Task LoadAsync()
     {
-        if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
-        {
-            _loading = false;
-            _error = "no-access";
-            return;
-        }
-
+        _loading = true;
         try
         {
             _request = await Requests.GetAsync(Id);
-            if (_request is null)
-            {
-                _error = "not-found";
-            }
+            if (_request is null) { _notFound = true; return; }
+            _notFound = false;
+            _timeline = await Requests.GetTimelineAsync(Id);
+            if (IsSource)
+                _sourceAvailable = (await Inventory.GetOwnInventoryAsync()).FirstOrDefault(item => item.BloodType == _request.BloodType)?.AvailableUnits ?? 0;
             else
-            {
-                _isSource = CurrentUser.FacilityId == _request.SourceFacilityId;
-            }
+                _sourceAvailable = null;
+            _error = null;
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
-            _error = "no-access";
+            _notFound = true;
+        }
+        catch (System.UnauthorizedAccessException)
+        {
+            _notFound = true;
         }
         catch (Exception)
         {
-            _error = "load";
+            _error = "We could not load the request and its persisted history.";
         }
-        finally
-        {
-            _loading = false;
-        }
+        finally { _loading = false; }
     }
 
     private void Begin(string action)
     {
         _confirming = action;
-        _unitsAccepted = _request?.UnitsRequested ?? 1;
-        _note = null;
+        _note = string.Empty;
+        _unitsAccepted = Math.Min(_request?.UnitsRequested ?? 1, _sourceAvailable ?? 0);
         _actionError = null;
+        _success = null;
     }
 
-    private void ResetConfirm()
-    {
-        _confirming = null;
-        _note = null;
-        _actionError = null;
-    }
+    private void ClearConfirmation() { _confirming = null; _note = null; }
 
-    private async Task ConfirmAsync()
+    private async Task SubmitAsync()
     {
-        if (_request is null || _confirming is null)
-        {
-            return;
-        }
-
+        if (!CanSubmit || _request is null || _confirming is null) return;
         _busy = true;
         _actionError = null;
         try
         {
             switch (_confirming)
             {
-                case "accept":
-                    await Requests.AcceptAsync(new RequestResponseRequest(_request.Id, _unitsAccepted, _note));
-                    break;
-                case "reject":
-                    await Requests.RejectAsync(new RequestResponseRequest(_request.Id, null, _note));
-                    break;
-                case "fulfil":
-                    await Requests.FulfilAsync(new FulfilRequestRequest(_request.Id, _note));
-                    break;
-                case "cancel":
-                    await Requests.CancelAsync(_request.Id);
-                    break;
+                case "accept": await Requests.AcceptAsync(new RequestResponseRequest(Id, _unitsAccepted, TrimNote())); break;
+                case "reject": await Requests.RejectAsync(new RequestResponseRequest(Id, null, TrimNote())); break;
+                case "cancel": await Requests.CancelAsync(Id); break;
+                case "fulfil": await Requests.FulfilAsync(new FulfilRequestRequest(Id, TrimNote())); break;
             }
-            _confirming = null;
-            _note = null;
-            _request = await Requests.GetAsync(Id);
-            _saved = "Request updated.";
+            ClearConfirmation();
+            await LoadAsync();
+            _success = "The request and timeline have been refreshed.";
         }
-        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        catch (BloodLink.Domain.Exceptions.ConcurrencyException)
         {
-            _actionError = "You are not authorized to perform this action.";
+            _actionError = "Request or inventory state changed. Review the refreshed record before retrying.";
+            await LoadAsync();
         }
         catch (BloodLink.Domain.Exceptions.InsufficientInventoryException)
         {
-            _actionError = "There is not enough available inventory to accept this request.";
+            _actionError = "Available or reserved stock changed. No transition was confirmed; refresh and review the request.";
+            await LoadAsync();
         }
-        catch (Exception ex)
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
-            _actionError = ex.Message;
+            _actionError = "Your account is not authorized for this transition.";
         }
-        finally
+        catch (Exception)
         {
-            _busy = false;
+            _actionError = "The transition could not be completed. Refresh and review the current request state.";
+            await LoadAsync();
         }
+        finally { _busy = false; }
     }
+
+    private string? TrimNote() => string.IsNullOrWhiteSpace(_note) ? null : _note.Trim();
+    private static string DateLabel(DateTime? value) => value is null ? "-" : BloodDisplay.FormatTimestamp(value.Value);
 }

@@ -1,10 +1,9 @@
 @page "/needs"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IBloodNeedService Needs
 @inject ICurrentUserService CurrentUser
-@inject NavigationManager Nav
 
 <PageTitle>All Needs | BloodLink</PageTitle>
 
@@ -33,25 +32,21 @@ else if (_error == "load")
 }
 else
 {
-    <div class="bl-filter-tabs" role="tablist">
-        @foreach (var filter in Filters)
-        {
-            <button type="button"
-                    class="bl-filter-btn @(_filter == filter ? "is-active" : "")"
-                    @onclick="() => _filter = filter">
-                @filter
-                @if (filter != "All")
-                {
-                    <span class="bl-filter-count">@_needs.Count(n => BloodDisplay.BloodNeedStatusLabel(n.Status) == filter)</span>
-                }
-            </button>
-        }
+    <div class="bl-field bl-filter-control">
+        <label class="bl-label" for="facility-need-filter">Status</label>
+        <InputSelect id="facility-need-filter" class="bl-input bl-select" @bind-Value="_filter">
+            <option value="">All statuses</option>
+            @foreach (var status in Enum.GetValues<BloodNeedStatus>())
+            {
+                <option value="@status">@BloodDisplay.BloodNeedStatusLabel(status)</option>
+            }
+        </InputSelect>
     </div>
 
-    @if (Filtered.Count() == 0)
+    @if (!Filtered.Any())
     {
-        <EmptyState Icon="clipboard-list" Title="No needs"
-                    Description="@(_filter == "All" ? "Staff submissions will appear here for review." : $"No needs match the '{_filter}' status.")" />
+        <EmptyState Icon="clipboard-list" Title="@(_needs.Count == 0 ? "No needs" : "No matching needs")"
+                    Description="@(_needs.Count == 0 ? "Staff submissions will appear here for review." : "Change the status filter to see another status.")" />
     }
     else
     {
@@ -64,20 +59,24 @@ else
                             <th>Blood Type</th>
                             <th>Units</th>
                             <th>Urgency</th>
+                            <th>Requested by</th>
                             <th>Status</th>
                             <th>Submitted</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var need in Filtered)
                         {
-                            <tr class="bl-tr-click" @onclick="() => Go(need.Id)">
+                            <tr>
                                 <td class="bl-mono">@BloodDisplay.ShortId(need.Id)</td>
                                 <td><BloodTypeBadge Value="need.BloodType" /></td>
                                 <td class="bl-strong">@need.UnitsNeeded</td>
                                 <td><span class="bl-status-badge bl-status-@BloodDisplay.UrgencyTone(need.Urgency)">@BloodDisplay.UrgencyLabel(need.Urgency)</span></td>
+                                <td>@(_details.TryGetValue(need.Id, out var detail) ? detail.CreatorDisplayName : "Staff member")</td>
                                 <td><span class="bl-status-badge bl-status-@BloodDisplay.BloodNeedStatusTone(need.Status)">@BloodDisplay.BloodNeedStatusLabel(need.Status)</span></td>
                                 <td class="bl-muted">@BloodDisplay.FormatTimestamp(need.CreatedAtUtc)</td>
+                                <td><a class="bl-link" href="@($"/needs/{need.Id}")">Review <AppIcon Name="chevron-right" Size="12" /></a></td>
                             </tr>
                         }
                     </tbody>
@@ -90,19 +89,13 @@ else
 @code {
     private bool _loading = true;
     private string? _error;
-    private string _filter = "All";
+    private string _filter = string.Empty;
     private IReadOnlyList<BloodNeedDto> _needs = [];
-
-    private static readonly string[] Filters =
-    [
-        "All", "Pending Review", "Searching", "Fulfilled Internally", "Fulfilled Externally", "Rejected", "Cancelled"
-    ];
+    private readonly Dictionary<Guid, BloodNeedDetailDto> _details = [];
 
     private IEnumerable<BloodNeedDto> Filtered =>
-        _filter == "All"
-            ? _needs.OrderByDescending(need => need.CreatedAtUtc)
-            : _needs.Where(need => BloodDisplay.BloodNeedStatusLabel(need.Status) == _filter)
-                .OrderByDescending(need => need.CreatedAtUtc);
+        _needs.Where(need => string.IsNullOrEmpty(_filter) || need.Status.ToString() == _filter)
+            .OrderByDescending(need => need.CreatedAtUtc).ThenBy(need => need.Id);
 
     protected override async Task OnInitializedAsync()
     {
@@ -116,6 +109,14 @@ else
         try
         {
             _needs = await Needs.ListOwnFacilityAsync();
+            foreach (var need in _needs)
+            {
+                var detail = await Needs.GetAsync(need.Id);
+                if (detail is not null)
+                {
+                    _details[need.Id] = detail;
+                }
+            }
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
@@ -131,5 +132,4 @@ else
         }
     }
 
-    private void Go(Guid id) => Nav.NavigateTo($"/needs/{id}");
 }

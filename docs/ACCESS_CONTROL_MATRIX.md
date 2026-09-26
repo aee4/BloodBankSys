@@ -17,6 +17,8 @@
 | View notifications | Own | Own | Own | Own |
 | View platform audit/reporting | Yes | Own-facility summary | No | No |
 
+UI routes mirror these capabilities: `/needs/new` and `/needs/mine` require `RequireFacilityStaff`; `/needs` requires `RequireFacilityAdmin`; need detail uses authenticated route access plus record-scoped service authorization. Inventory search and request routes require `RequireFacilityAdmin`, with request detail and timeline further scoped by the service to participating facilities. Dashboard and notification data are recipient/role-scoped by their snapshot services. Hiding a control or navigation link is not authorization; all mutations are revalidated by the service.
+
 FacilityStaff permissions are the same whether the facility is a hospital or a blood bank. FacilityAdmin users do not receive platform authority.
 
 Every protected service operation must verify signed-in user, role, active status, FacilityId, approved facility status, and record relationship.

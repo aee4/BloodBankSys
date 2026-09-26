@@ -32,7 +32,7 @@ public sealed class RolePagesTests
     }
 
     [Fact]
-    public async Task Staff_RequestsSent_ShowsNoAccess()
+    public async Task Staff_RequestsSent_IsDeniedByRoutePolicy()
     {
         using var app = new SecurityTestApplication();
         using var client = app.Browser();
@@ -42,9 +42,8 @@ public sealed class RolePagesTests
 
         var response = await client.GetAsync("/requests/sent");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var html = await response.Content.ReadAsStringAsync();
-        Assert.Contains("Only facility administrators", html);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/account/access-denied", response.Headers.Location?.OriginalString);
     }
 
     [Fact]
@@ -62,6 +61,77 @@ public sealed class RolePagesTests
         var html = await response.Content.ReadAsStringAsync();
         Assert.Contains("Requests Sent", html);
         Assert.Contains("No requests sent yet", html);
+    }
+
+    [Fact]
+    public async Task RequestDetail_ShowsCancellationOnlyToTheAuthenticatedSourceFacilityAdmin()
+    {
+        using var app = new SecurityTestApplication();
+        var requester = await app.SeedAsync(RoleNames.FacilityAdmin);
+        var source = await app.SeedAsync(RoleNames.FacilityAdmin);
+        var unrelated = await app.SeedAsync(RoleNames.FacilityAdmin);
+        var requestId = Guid.NewGuid();
+        await using (var db = await DbAsync(app))
+        {
+            var requesterFacility = await db.Facilities.SingleAsync(item => item.Id == requester.FacilityId);
+            requesterFacility.Name = "Requesting Hospital";
+            var sourceFacility = await db.Facilities.SingleAsync(item => item.Id == source.FacilityId);
+            sourceFacility.Name = "Source Blood Bank";
+            var needId = Guid.NewGuid();
+            db.BloodNeeds.Add(new BloodNeed
+            {
+                Id = needId,
+                FacilityId = requesterFacility.Id,
+                RequestedByUserId = requester.Id,
+                BloodType = BloodType.APositive,
+                UnitsNeeded = 5,
+                Urgency = UrgencyLevel.Urgent,
+                NeededByUtc = DateTime.UtcNow.AddDays(1),
+                Status = BloodNeedStatus.Searching,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            db.BloodRequests.Add(new BloodRequest
+            {
+                Id = requestId,
+                BloodNeedId = needId,
+                RequestingFacilityId = requesterFacility.Id,
+                SourceFacilityId = sourceFacility.Id,
+                BloodType = BloodType.APositive,
+                UnitsRequested = 5,
+                Status = BloodRequestStatus.Sent,
+                RequestedByAdminId = requester.Id,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var requesterClient = app.Browser();
+        await SecurityTestApplication.LoginAsync(requesterClient, requester);
+        var requesterResponse = await requesterClient.GetAsync($"/requests/{requestId}");
+        var requesterHtml = await requesterResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, requesterResponse.StatusCode);
+        Assert.Contains("Requesting Hospital", requesterHtml);
+        Assert.Contains("Source Blood Bank", requesterHtml);
+        Assert.DoesNotContain("Cancel request", requesterHtml);
+        Assert.DoesNotContain("Source facility actions", requesterHtml);
+
+        using var sourceClient = app.Browser();
+        await SecurityTestApplication.LoginAsync(sourceClient, source);
+        var sourceResponse = await sourceClient.GetAsync($"/requests/{requestId}");
+        var sourceHtml = await sourceResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, sourceResponse.StatusCode);
+        Assert.Contains("Cancel request", sourceHtml);
+        Assert.Contains("Accept", sourceHtml);
+
+        using var unrelatedClient = app.Browser();
+        await SecurityTestApplication.LoginAsync(unrelatedClient, unrelated);
+        var unrelatedResponse = await unrelatedClient.GetAsync($"/requests/{requestId}");
+        var unrelatedHtml = await unrelatedResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, unrelatedResponse.StatusCode);
+        Assert.Contains("Request not found", unrelatedHtml);
+        Assert.DoesNotContain("Requesting Hospital", unrelatedHtml);
+        Assert.DoesNotContain("Source Blood Bank", unrelatedHtml);
     }
 
     [Fact]
@@ -228,6 +298,65 @@ public sealed class RolePagesTests
         var html = await response.Content.ReadAsStringAsync();
         Assert.Contains("Notifications", html);
         Assert.Contains("No notifications", html);
+    }
+
+    [Fact]
+    public async Task Notifications_LinkOnlyToAuthorizedAllowlistedRecords()
+    {
+        using var app = new SecurityTestApplication();
+        using var client = app.Browser();
+        var user = await app.SeedAsync(RoleNames.FacilityStaff);
+        var needId = Guid.NewGuid();
+        await using (var db = await DbAsync(app))
+        {
+            db.BloodNeeds.Add(new BloodNeed
+            {
+                Id = needId,
+                FacilityId = user.FacilityId!.Value,
+                RequestedByUserId = user.Id,
+                BloodType = BloodType.BPositive,
+                UnitsNeeded = 2,
+                Urgency = UrgencyLevel.Routine,
+                NeededByUtc = DateTime.UtcNow.AddDays(1),
+                Status = BloodNeedStatus.PendingReview,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            });
+            db.Notifications.AddRange(
+                new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    RecipientUserId = user.Id,
+                    NotificationType = NotificationType.NewNeed,
+                    Title = "Need update",
+                    Message = "Your need has an update.",
+                    RelatedEntityType = nameof(BloodNeed),
+                    RelatedEntityId = needId,
+                    CreatedAtUtc = DateTime.UtcNow
+                },
+                new Notification
+                {
+                    Id = Guid.NewGuid(),
+                    RecipientUserId = user.Id,
+                    NotificationType = NotificationType.Security,
+                    Title = "Untrusted reference",
+                    Message = "No external link is allowed.",
+                    RelatedEntityType = "https://example.invalid/redirect",
+                    RelatedEntityId = Guid.NewGuid(),
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            await db.SaveChangesAsync();
+        }
+        await SecurityTestApplication.LoginAsync(client, user);
+
+        var response = await client.GetAsync("/notifications");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains($"href=\"/needs/{needId}\"", html);
+        Assert.DoesNotContain("https://example.invalid/redirect", html);
+        Assert.Contains("Mark all read", html);
+        Assert.Contains("Unread", html);
     }
 
     [Fact]

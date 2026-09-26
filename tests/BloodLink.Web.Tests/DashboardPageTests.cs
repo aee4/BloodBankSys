@@ -18,8 +18,8 @@ public sealed class DashboardPageTests
     }
 
     [Theory]
-    [InlineData(RoleNames.FacilityStaff, "My Open Needs")]
-    [InlineData(RoleNames.FacilityAdmin, "Inventory at a Glance")]
+    [InlineData(RoleNames.FacilityStaff, "Open needs")]
+    [InlineData(RoleNames.FacilityAdmin, "Available inventory")]
     [InlineData(RoleNames.SystemAdmin, "System Dashboard")]
     public async Task Authenticated_Role_SeesTheirDashboard(string role, string expectedText)
     {

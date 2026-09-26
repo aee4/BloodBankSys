@@ -6,6 +6,10 @@ The existing acceptance rows below describe the original release baseline. The s
 
 External request cancellation is source-admin-only per the authoritative blueprint. Only the source facility's active FacilityAdmin can cancel a sent or accepted request; accepted cancellation releases exactly the accepted amount atomically. Requesting-side cancellation is unauthorized.
 
+## Phase 5C-B UI status
+
+The Phase 5C-B Razor workflow is covered by 368 solution tests (0 failed, 0 skipped), plus 9 opt-in SQL Server LocalDB relational tests (0 failed). Release build completed with 0 warnings and 0 errors; format verification passed; the vulnerability scan found no vulnerable packages; EF reports no pending model changes. Real Chromium acceptance passed 44/44 workflow assertions against a disposable LocalDB database, with 5 additional edge checks covering invalid quantity, rapid duplicate submission, narrow viewport overflow, and missing-record privacy responses. SQL rows confirmed exact one-unit internal consumption, release of all 6 partially accepted reserved units on source cancellation, and exact 8-unit external transfer with matching request/need history. The database and temporary test accounts were removed after verification.
+
 **Document Version:** 1.0.0  
 **Date:** 16 August 2026  
 **Author:** Jennifer Banibensu, DevOps & QA/Test Engineer (Student ID: 22013023)  

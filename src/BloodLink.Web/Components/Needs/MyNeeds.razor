@@ -1,10 +1,9 @@
 @page "/needs/mine"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityStaff)]
 @inject IBloodNeedService Needs
 @inject ICurrentUserService CurrentUser
-@inject NavigationManager Nav
 
 <PageTitle>My Needs | BloodLink</PageTitle>
 
@@ -45,41 +44,69 @@ else if (_needs.Count == 0)
 }
 else
 {
+    <div class="bl-field bl-filter-control">
+        <label class="bl-label" for="need-status-filter">Status</label>
+        <InputSelect id="need-status-filter" class="bl-input bl-select" @bind-Value="_statusFilter">
+            <option value="">All statuses</option>
+            @foreach (var status in Enum.GetValues<BloodNeedStatus>())
+            {
+                <option value="@status">@BloodDisplay.BloodNeedStatusLabel(status)</option>
+            }
+        </InputSelect>
+    </div>
+    @if (!FilteredNeeds.Any())
+    {
+        <EmptyState Icon="clipboard-list" Title="No matching needs" Description="Change the status filter to see another status." />
+    }
+    else
+    {
     <section class="bl-card">
         <div class="bl-table-wrap">
             <table class="bl-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Reference</th>
                         <th>Blood Type</th>
                         <th>Units</th>
                         <th>Urgency</th>
                         <th>Status</th>
-                        <th>Submitted</th>
+                        <th>Submitted / updated</th>
+                        <th>Context</th>
+                        <th>Open</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var need in _needs)
+                    @foreach (var need in FilteredNeeds)
                     {
-                        <tr class="bl-tr-click" @onclick="() => Go(need.Id)">
+                        <tr>
                             <td class="bl-mono">@BloodDisplay.ShortId(need.Id)</td>
                             <td><BloodTypeBadge Value="need.BloodType" /></td>
                             <td class="bl-strong">@need.UnitsNeeded</td>
                             <td><span class="bl-status-badge bl-status-@BloodDisplay.UrgencyTone(need.Urgency)">@BloodDisplay.UrgencyLabel(need.Urgency)</span></td>
                             <td><span class="bl-status-badge bl-status-@BloodDisplay.BloodNeedStatusTone(need.Status)">@BloodDisplay.BloodNeedStatusLabel(need.Status)</span></td>
-                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(need.CreatedAtUtc)</td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(need.CreatedAtUtc)<br />Updated: @(_details.TryGetValue(need.Id, out var detail) ? BloodDisplay.FormatTimestamp(detail.UpdatedAtUtc) : "-")</td>
+                            <td>@(_details.TryGetValue(need.Id, out var context) && !string.IsNullOrWhiteSpace(context.Note) ? context.Note : "-")</td>
+                            <td><a class="bl-link" href="@($"/needs/{need.Id}")">Details <AppIcon Name="chevron-right" Size="12" /></a></td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
     </section>
+    }
 }
 
 @code {
     private bool _loading = true;
     private string? _error;
     private IReadOnlyList<BloodNeedDto> _needs = [];
+    private readonly Dictionary<Guid, BloodNeedDetailDto> _details = [];
+    private string _statusFilter = string.Empty;
+
+    private IEnumerable<BloodNeedDto> FilteredNeeds => _needs
+        .Where(need => string.IsNullOrEmpty(_statusFilter) || need.Status.ToString() == _statusFilter)
+        .OrderByDescending(need => need.CreatedAtUtc)
+        .ThenBy(need => need.Id);
 
     protected override async Task OnInitializedAsync()
     {
@@ -92,9 +119,12 @@ else
 
         try
         {
-            _needs = (await Needs.GetMineAsync())
-                .OrderByDescending(need => need.CreatedAtUtc)
-                .ToList();
+            _needs = await Needs.GetMineAsync();
+            foreach (var need in _needs)
+            {
+                var detail = await Needs.GetAsync(need.Id);
+                if (detail is not null) _details[need.Id] = detail;
+            }
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
@@ -110,5 +140,4 @@ else
         }
     }
 
-    private void Go(Guid id) => Nav.NavigateTo($"/needs/{id}");
 }

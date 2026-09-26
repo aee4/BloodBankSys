@@ -1,5 +1,9 @@
 # BloodLink Requirements & Workflow Traceability Matrix
 
+## Phase 5C-B UI evidence
+
+Web route/page tests cover canonical route ownership and policy metadata, need form rendering, scoped lists and details, persisted timeline/inventory context, handoff query tampering, actor-specific request controls, and allowlisted notification navigation. Verification passed 368 solution tests and 9 opt-in SQL Server LocalDB relational tests. Real Chromium acceptance passed 44 workflow assertions and 5 additional edge checks against a disposable LocalDB database. Persisted evidence confirmed exact internal consumption, reservation release on cancellation, external transfer quantities, and terminal timeline states; the temporary database and test accounts were removed after verification.
+
 ## Phase 5C-A contract evidence
 
 The backend prerequisite adds focused service/acceptance tests for authorized need reads and persisted timelines, exact internal inventory consumption, rollback behavior, availability recheck, participant-scoped request timelines, safe notification references, and role-scoped dashboard data. SQL Server LocalDB-only atomicity/concurrency proof lives in `tests/BloodLink.Relational.Tests` and is intentionally outside the default solution test run. This is backend contract coverage, not evidence that Phase 5C Razor screens are complete.

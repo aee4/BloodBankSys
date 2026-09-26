@@ -3,7 +3,10 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IInventoryService Inventory
+@inject IBloodNeedService Needs
+@inject IBloodRequestService Requests
 @inject ICurrentUserService CurrentUser
+@inject NavigationManager Navigation
 
 <PageTitle>Network Blood Search | BloodLink</PageTitle>
 
@@ -19,6 +22,54 @@
         <p class="bl-dash-subtitle">Find exact blood-type availability at other approved facilities</p>
     </div>
 </div>
+
+@if (_needLoadError)
+{
+    <AlertMessage Variant="danger" Title="Need unavailable"><span>This need could not be loaded or is not eligible for network search.</span></AlertMessage>
+}
+else if (_need is not null)
+{
+    <section class="bl-card bl-card-pad">
+        <h2 class="bl-card-title">External request for Need @BloodDisplay.ShortId(_need.Id)</h2>
+        <p>Blood type: <BloodTypeBadge Value="_need.BloodType" /> <strong>@_need.UnitsNeeded units</strong> required. Source availability is checked again when you submit.</p>
+        <p class="bl-muted">Request creation does not reserve inventory.</p>
+        <div class="bl-field">
+            <label class="bl-label" for="source-facility">Source facility <span>*</span></label>
+            <InputSelect id="source-facility" class="bl-input bl-select" @bind-Value="_selectedSourceId">
+                <option value="">Select a search result</option>
+                @foreach (var result in _results)
+                {
+                    <option value="@result.FacilityId">@result.FacilityName - @result.AvailableUnits available</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="bl-field">
+            <label class="bl-label" for="request-note">Request note (optional)</label>
+            <InputTextArea id="request-note" class="bl-input bl-textarea" @bind-Value="_requestNote" rows="2" maxlength="1000" />
+        </div>
+        @if (_confirmRequest)
+        {
+            <div class="bl-confirm-box" role="alertdialog" aria-labelledby="request-confirm-title">
+                <h3 id="request-confirm-title">Confirm external request</h3>
+                <p>The selected approved facility will receive a request for @_need.UnitsNeeded units of @BloodDisplay.BloodTypeLabel(_need.BloodType). No stock is reserved until the source accepts.</p>
+                @if (_createError is not null)
+                {
+                    <AlertMessage Variant="danger" Title="Request not created"><span>@_createError</span></AlertMessage>
+                }
+                <div class="bl-confirm-actions">
+                    <button class="bl-btn bl-btn-outline" type="button" @onclick="() => _confirmRequest = false" disabled="@_creating">Back</button>
+                    <button class="bl-btn bl-btn-primary" type="button" @onclick="CreateRequestAsync" disabled="@(_creating || _selectedSourceId is null)">
+                        @(_creating ? "Submitting..." : "Send request")
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <button class="bl-btn bl-btn-primary" type="button" @onclick="() => _confirmRequest = true" disabled="@(_selectedSourceId is null || _creating)">Review request</button>
+        }
+    </section>
+}
 
 @if (_error == "no-access")
 {
@@ -94,13 +145,22 @@ else
                                     <td><BloodTypeBadge Value="@result.BloodType" /></td>
                                     <td><span class="bl-avail-lg">@result.AvailableUnits</span> <span class="bl-muted">available</span></td>
                                     <td class="bl-muted">@BloodDisplay.FormatTimestamp(result.UpdatedAtUtc)</td>
-                                    <td><span class="bl-muted">Request workflow is Phase 5C</span></td>
+                                    <td>
+                                        @if (_need is not null)
+                                        {
+                                            <button class="bl-btn-sm bl-btn-sm-success" type="button" @onclick="() => SelectSource(result.FacilityId)">Select source</button>
+                                        }
+                                        else
+                                        {
+                                            <span class="bl-muted">Search from an eligible need to request</span>
+                                        }
+                                    </td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
-                <p class="bl-search-note">Search is exact blood type only. Reserved stock is excluded from available units. Creating external requests is not part of Phase 5B.</p>
+                <p class="bl-search-note">Search matches exact blood type. Reserved stock is excluded. Availability is rechecked when a request is submitted.</p>
             </section>
         }
     }
@@ -116,14 +176,47 @@ else
     private string _messageTitle = "Check the search";
     private string _messageVariant = "danger";
     private IReadOnlyList<AvailabilityResultDto> _results = [];
+    private bool _needLoadError;
+    private bool _confirmRequest;
+    private bool _creating;
+    private string? _createError;
+    private string? _requestNote;
+    private Guid? _selectedSourceId;
+    private BloodNeedDetailDto? _need;
+
+    [SupplyParameterFromQuery(Name = "needId")]
+    public Guid? NeedId { get; set; }
 
     private static readonly BloodType[] BloodTypes = Enum.GetValues<BloodType>();
 
-    protected override void OnInitialized()
+    protected override async Task OnParametersSetAsync()
     {
         if (!CurrentUser.IsInRole(RoleNames.FacilityAdmin))
         {
             _error = "no-access";
+            return;
+        }
+
+        if (NeedId is { } needId)
+        {
+            try
+            {
+                _need = await Needs.GetAsync(needId);
+                if (_need is null || _need.Status != BloodNeedStatus.Searching)
+                {
+                    _need = null;
+                    _needLoadError = true;
+                    return;
+                }
+
+                _bloodType = _need.BloodType;
+                _minUnits = _need.UnitsNeeded;
+                await SearchAsync();
+            }
+            catch (Exception)
+            {
+                _needLoadError = true;
+            }
         }
     }
 
@@ -163,6 +256,50 @@ else
         _message = message;
         _messageVariant = variant;
         _messageTitle = title;
+    }
+
+    private void SelectSource(Guid facilityId)
+    {
+        if (_results.Any(result => result.FacilityId == facilityId))
+        {
+            _selectedSourceId = facilityId;
+            _createError = null;
+            _confirmRequest = true;
+        }
+    }
+
+    private async Task CreateRequestAsync()
+    {
+        if (_need is null || _selectedSourceId is not { } sourceId || _creating)
+        {
+            return;
+        }
+
+        _creating = true;
+        _createError = null;
+        try
+        {
+            var request = await Requests.CreateFromNeedAsync(new CreateBloodRequestRequest(
+                _need.Id, sourceId, _need.UnitsNeeded, string.IsNullOrWhiteSpace(_requestNote) ? null : _requestNote.Trim()));
+            Navigation.NavigateTo($"/requests/{request.Id}");
+        }
+        catch (BloodLink.Domain.Exceptions.InsufficientInventoryException)
+        {
+            _createError = "Availability changed. No request was created; search again for current stock.";
+            _searched = false;
+        }
+        catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
+        {
+            _createError = "Your account is not authorized to create this request.";
+        }
+        catch (Exception)
+        {
+            _createError = "The request could not be confirmed as created. Refresh the need and try again.";
+        }
+        finally
+        {
+            _creating = false;
+        }
     }
 
     private static string Location(AvailabilityResultDto result) =>

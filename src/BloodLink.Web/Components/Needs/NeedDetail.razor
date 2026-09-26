@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IBloodNeedService Needs
+@inject IInventoryService Inventory
 @inject ICurrentUserService CurrentUser
 
 <PageTitle>Need @BloodDisplay.ShortId(Id) | BloodLink</PageTitle>
@@ -13,104 +14,113 @@
 }
 else if (_notFound)
 {
-    <EmptyState Icon="search" Title="Need not found"
-                Description="This blood need could not be found or you don't have access to it.">
+    <EmptyState Icon="search" Title="Need not found" Description="This need could not be found or you do not have access to it.">
         <a class="bl-btn bl-btn-primary" href="@BackHref">Back to @BackLabel</a>
     </EmptyState>
 }
+else if (_loadError || _need is null)
+{
+    <AlertMessage Variant="danger" Title="Could not load need">
+        <span>We could not load this need right now. Please try again.</span>
+    </AlertMessage>
+}
 else
 {
-    <div class="bl-breadcrumb">
+    <nav class="bl-breadcrumb" aria-label="Breadcrumb">
         <a href="@BackHref">@BackLabel</a>
         <AppIcon Name="chevron-right" Size="12" />
-        <span>@BloodDisplay.ShortId(_need!.Id)</span>
-    </div>
+        <span>Need @BloodDisplay.ShortId(_need.Id)</span>
+    </nav>
 
-    @if (_actionError == "no-access")
+    @if (_actionError is not null)
     {
-        <AlertMessage Variant="danger" Title="Action not allowed">
-            <span>You are not authorized to perform that action on this blood need.</span>
-        </AlertMessage>
+        <AlertMessage Variant="danger" Title="Need was not updated"><span>@_actionError</span></AlertMessage>
     }
-    else if (_actionError == "invalid")
+    @if (_success is not null)
     {
-        <AlertMessage Variant="danger" Title="Missing information">
-            <span>A reason is required for this action.</span>
-        </AlertMessage>
-    }
-    else if (_actionError == "domain")
-    {
-        <AlertMessage Variant="danger" Title="Action not possible">
-            <span>@_domainMessage</span>
-        </AlertMessage>
-    }
-    else if (_actionSuccess)
-    {
-        <AlertMessage Variant="success" Title="Need updated">
-            <span>Status is now @BloodDisplay.BloodNeedStatusLabel(_need!.Status).</span>
-        </AlertMessage>
+        <AlertMessage Variant="success" Title="Need updated"><span>@_success</span></AlertMessage>
     }
 
     <div class="bl-detail-grid">
-        <div class="bl-detail-main">
+        <main class="bl-detail-main">
             <section class="bl-card bl-card-pad">
                 <div class="bl-detail-head">
                     <div>
-                        <h2 class="bl-detail-title">Blood Need @BloodDisplay.ShortId(_need.Id)</h2>
-                        <p class="bl-detail-sub">Submitted @BloodDisplay.FormatTimestamp(_need.CreatedAtUtc)</p>
+                        <h1 class="bl-detail-title">Blood Need @BloodDisplay.ShortId(_need.Id)</h1>
+                        <p class="bl-detail-sub">@_need.FacilityName</p>
                     </div>
                     <div class="bl-badge-row">
                         <span class="bl-status-badge bl-status-@BloodDisplay.UrgencyTone(_need.Urgency)">@BloodDisplay.UrgencyLabel(_need.Urgency)</span>
                         <span class="bl-status-badge bl-status-@BloodDisplay.BloodNeedStatusTone(_need.Status)">@BloodDisplay.BloodNeedStatusLabel(_need.Status)</span>
                     </div>
                 </div>
+                <dl class="bl-detail-facts">
+                    <div><dt class="bl-detail-label">Blood type</dt><dd><BloodTypeBadge Value="_need.BloodType" /></dd></div>
+                    <div><dt class="bl-detail-label">Units needed</dt><dd class="bl-detail-fact-lg">@_need.UnitsNeeded</dd></div>
+                    <div><dt class="bl-detail-label">Requested by</dt><dd>@_need.CreatorDisplayName</dd></div>
+                    <div><dt class="bl-detail-label">Needed by</dt><dd>@BloodDisplay.FormatTimestamp(_need.NeededByUtc)</dd></div>
+                    <div><dt class="bl-detail-label">Submitted</dt><dd>@BloodDisplay.FormatTimestamp(_need.CreatedAtUtc)</dd></div>
+                    <div><dt class="bl-detail-label">Last updated</dt><dd>@BloodDisplay.FormatTimestamp(_need.UpdatedAtUtc)</dd></div>
+                </dl>
+                @if (!string.IsNullOrWhiteSpace(_need.Note))
+                {
+                    <div class="bl-detail-context"><h2 class="bl-card-title">Submitted context</h2><p>@_need.Note</p></div>
+                }
+                @if (!string.IsNullOrWhiteSpace(_need.DecisionReason))
+                {
+                    <div class="bl-detail-context"><h2 class="bl-card-title">Latest decision</h2><p>@_need.DecisionReason</p></div>
+                }
+            </section>
 
-                <div class="bl-detail-facts">
-                    <div>
-                        <p class="bl-detail-label">Blood Type</p>
-                        <BloodTypeBadge Value="_need.BloodType" />
-                    </div>
-                    <div>
-                        <p class="bl-detail-label">Units Needed</p>
-                        <p class="bl-detail-fact-lg">@_need.UnitsNeeded</p>
-                    </div>
-                    <div>
-                        <p class="bl-detail-label">Urgency</p>
-                        <p class="bl-detail-fact">@BloodDisplay.UrgencyLabel(_need.Urgency)</p>
-                    </div>
-                    <div>
-                        <p class="bl-detail-label">Status</p>
-                        <p class="bl-detail-fact">@BloodDisplay.BloodNeedStatusLabel(_need.Status)</p>
-                    </div>
-                </div>
+            <section class="bl-card bl-card-pad" aria-labelledby="need-inventory-title">
+                <h2 id="need-inventory-title" class="bl-card-title">Matching facility inventory</h2>
+                @if (_need.InventoryTotalUnits is { } total && _need.InventoryReservedUnits is { } reserved && _need.InventoryAvailableUnits is { } available)
+                {
+                    <dl class="bl-detail-facts">
+                        <div><dt class="bl-detail-label">Total</dt><dd>@total</dd></div>
+                        <div><dt class="bl-detail-label">Reserved</dt><dd>@reserved</dd></div>
+                        <div><dt class="bl-detail-label">Available</dt><dd>@available</dd></div>
+                        <div><dt class="bl-detail-label">Stock level</dt><dd>@(_lowStock ? "At or below low-stock threshold" : "Above low-stock threshold")</dd></div>
+                    </dl>
+                }
+                else
+                {
+                    <p>No matching inventory record is currently available.</p>
+                }
             </section>
 
             @if (_isAdmin && _need.Status == BloodNeedStatus.Searching)
             {
                 <section class="bl-card bl-card-pad">
-                    <h3 class="bl-card-title">Search the Network</h3>
-                    <p class="bl-card-desc">This need is actively searching. Check availability at other facilities and send them a blood request.</p>
-                    <a class="bl-btn bl-btn-primary" href="/inventory/search">
-                        <AppIcon Name="search" Size="14" /> Search Network Blood
-                    </a>
+                    <h2 class="bl-card-title">Find an external source</h2>
+                    <p class="bl-card-desc">Search approved facilities for this need's exact blood type and quantity.</p>
+                    <a class="bl-btn bl-btn-primary" href="@($"/inventory/search?needId={_need.Id}")"><AppIcon Name="search" Size="14" /> Search network</a>
                 </section>
             }
 
-            @if (_isAdmin)
+            @if (HasActions)
             {
                 <section class="bl-card bl-card-pad">
-                    <h3 class="bl-card-title">Admin Actions</h3>
-                    @if (_confirming != null)
+                    <h2 class="bl-card-title">Need actions</h2>
+                    @if (_confirming is not null)
                     {
-                        <div class="bl-confirm-box">
-                            <label class="bl-label" for="action-reason">
-                                @(_confirming == "reject" ? "Rejection reason" : "Cancellation reason") <span>*</span>
-                            </label>
-                            <InputText id="action-reason" class="bl-input" @bind-Value="_reason" placeholder="Required" />
+                        <div class="bl-confirm-box" aria-live="polite">
+                            <p class="bl-card-desc">@ConfirmationText</p>
+                            @if (_confirming is "reject" or "cancel")
+                            {
+                                <label class="bl-label" for="need-action-reason">Reason <span>*</span></label>
+                                <InputTextArea id="need-action-reason" class="bl-input bl-textarea" @bind-Value="_reason" rows="3" maxlength="1000" />
+                            }
+                            else if (_confirming == "fulfil")
+                            {
+                                <p class="bl-warning-note">This consumes exactly @_need.UnitsNeeded available units from local stock.</p>
+                                <label class="bl-label" for="need-action-reason">Note (optional)</label>
+                                <InputText id="need-action-reason" class="bl-input" @bind-Value="_reason" maxlength="1000" />
+                            }
                             <div class="bl-confirm-actions">
-                                <button class="bl-btn bl-btn-outline" type="button" @onclick="() => _confirming = null">Keep It</button>
-                                <button class="bl-btn bl-btn-danger" type="button" @onclick="() => PerformAsync(_confirming!)" disabled="@_busy">
-                                    @(_confirming == "reject" ? "Yes, Reject Need" : "Yes, Cancel Need")
+                                <button class="bl-btn bl-btn-outline" type="button" @onclick="ClearConfirmation" disabled="@_busy">Keep need</button>
+                                <button class="bl-btn bl-btn-primary" type="button" @onclick="RunActionAsync" disabled="@(_busy || (RequiresReason && string.IsNullOrWhiteSpace(_reason)))">
+                                    @(_busy ? "Working..." : "Confirm")
                                 </button>
                             </div>
                         </div>
@@ -118,98 +128,77 @@ else
                     else
                     {
                         <div class="bl-action-row">
-                            <button class="bl-btn bl-btn-primary" type="button" @onclick='() => PerformAsync("start-search")'
-                                    disabled="@(_busy || !_canStartSearch)">
-                                <AppIcon Name="search" Size="14" /> Start Search
-                            </button>
-                            <button class="bl-btn" type="button" @onclick='() => PerformAsync("fulfil")'
-                                    disabled="@(_busy || !_canFulfil)">
-                                <AppIcon Name="circle-check" Size="14" /> Fulfil Internally
-                            </button>
-                            <button class="bl-btn bl-btn-danger" type="button" @onclick='() => _confirming = "reject"'
-                                    disabled="@(_busy || !_canReject)">
-                                <AppIcon Name="circle-alert" Size="14" /> Reject
-                            </button>
-                            <button class="bl-btn bl-btn-outline" type="button" @onclick='() => _confirming = "cancel"'
-                                    disabled="@(_busy || !_canCancel)">
-                                <AppIcon Name="circle-alert" Size="14" /> Cancel
-                            </button>
+                            @if (_canStartSearch) { <button class="bl-btn bl-btn-outline" type="button" @onclick='() => Begin("search")' disabled="@_busy">Start searching</button> }
+                            @if (_canFulfil) { <button class="bl-btn bl-btn-primary" type="button" @onclick='() => Begin("fulfil")' disabled="@_busy">Fulfil internally</button> }
+                            @if (_canReject) { <button class="bl-btn bl-btn-danger" type="button" @onclick='() => Begin("reject")' disabled="@_busy">Reject</button> }
+                            @if (_canCancel) { <button class="bl-btn bl-btn-outline" type="button" @onclick='() => Begin("cancel")' disabled="@_busy">Cancel need</button> }
                         </div>
                     }
                 </section>
             }
-            else if (_isCreator && _need.Status == BloodNeedStatus.PendingReview)
-            {
-                <section class="bl-card bl-card-pad">
-                    <h3 class="bl-card-title">Cancel This Need</h3>
-                    <p class="bl-card-desc">You can cancel this need while it is still pending review.</p>
-                    @if (_confirming == "cancel")
-                    {
-                        <div class="bl-confirm-box">
-                            <label class="bl-label" for="staff-action-reason">Cancellation reason <span>*</span></label>
-                            <InputText id="staff-action-reason" class="bl-input" @bind-Value="_reason" placeholder="Required" />
-                            <div class="bl-confirm-actions">
-                                <button class="bl-btn bl-btn-outline" type="button" @onclick="() => _confirming = null">Keep It</button>
-                                <button class="bl-btn bl-btn-danger" type="button" @onclick='() => PerformAsync("cancel")' disabled="@_busy">Yes, Cancel Need</button>
-                            </div>
-                        </div>
-                    }
-                    else
-                    {
-                        <button class="bl-btn bl-btn-outline" type="button" @onclick='() => _confirming = "cancel"'>
-                            <AppIcon Name="circle-alert" Size="14" /> Cancel This Need
-                        </button>
-                    }
-                </section>
-            }
-        </div>
+        </main>
 
-        <aside class="bl-card bl-card-pad bl-detail-aside">
-            <h3 class="bl-card-title">Status Timeline</h3>
-            <div class="bl-timeline">
-                <div class="bl-timeline-item">
-                    <span class="bl-timeline-dot"></span>
-                    <div>
-                        <p class="bl-timeline-time">@BloodDisplay.FormatTimestamp(_need.CreatedAtUtc)</p>
-                        <p class="bl-timeline-event">Need submitted</p>
-                    </div>
-                </div>
-                <div class="bl-timeline-item is-current">
-                    <span class="bl-timeline-dot"></span>
-                    <div>
-                        <p class="bl-timeline-time">Current status</p>
-                        <p class="bl-timeline-event">@BloodDisplay.BloodNeedStatusLabel(_need.Status)</p>
-                    </div>
-                </div>
-            </div>
+        <aside class="bl-card bl-card-pad bl-detail-aside" aria-labelledby="need-timeline-title">
+            <h2 id="need-timeline-title" class="bl-card-title">Status timeline</h2>
+            @if (_timeline.Count == 0)
+            {
+                <p class="bl-muted">No persisted status history is available.</p>
+            }
+            else
+            {
+                <ol class="bl-timeline">
+                    @foreach (var item in _timeline)
+                    {
+                        <li class="bl-timeline-item">
+                            <span class="bl-timeline-dot"></span>
+                            <div>
+                                <p class="bl-timeline-event">@(item.FromStatus is null ? "Submitted" : BloodDisplay.BloodNeedStatusLabel(item.FromStatus.Value)) <span aria-hidden="true">&rarr;</span> @BloodDisplay.BloodNeedStatusLabel(item.ToStatus)</p>
+                                <p class="bl-timeline-time">@BloodDisplay.FormatTimestamp(item.ChangedAtUtc) by @item.ActorDisplayName</p>
+                                @if (!string.IsNullOrWhiteSpace(item.Note)) { <p>@item.Note</p> }
+                            </div>
+                        </li>
+                    }
+                </ol>
+            }
         </aside>
     </div>
 }
 
 @code {
-    [Parameter, EditorRequired] public Guid Id { get; set; }
+    [Parameter] public Guid Id { get; set; }
 
     private bool _loading = true;
     private bool _notFound;
+    private bool _loadError;
     private bool _busy;
     private bool _isAdmin;
     private bool _isCreator;
-    private string? _actionError;
-    private string? _domainMessage;
-    private bool _actionSuccess;
+    private bool _lowStock;
     private string? _confirming;
-    private string _reason = string.Empty;
-    private BloodNeedDto? _need;
+    private string? _reason;
+    private string? _actionError;
+    private string? _success;
+    private BloodNeedDetailDto? _need;
+    private IReadOnlyList<BloodNeedTimelineItemDto> _timeline = [];
 
-    private string BackLabel => _isAdmin ? "All Needs" : "My Needs";
+    private string BackLabel => _isAdmin ? "Facility needs" : "My needs";
     private string BackHref => _isAdmin ? "/needs" : "/needs/mine";
+    private bool _canStartSearch => _isAdmin && _need?.Status == BloodNeedStatus.PendingReview;
+    private bool _canFulfil => _isAdmin && _need?.Status is BloodNeedStatus.PendingReview or BloodNeedStatus.Searching;
+    private bool _canReject => _isAdmin && _need?.Status == BloodNeedStatus.PendingReview;
+    private bool _canCancel => (_isAdmin && _need?.Status is BloodNeedStatus.PendingReview or BloodNeedStatus.Searching)
+        || (_isCreator && _need?.Status == BloodNeedStatus.PendingReview);
+    private bool HasActions => _canStartSearch || _canFulfil || _canReject || _canCancel;
+    private bool RequiresReason => _confirming is "reject" or "cancel";
+    private string ConfirmationText => _confirming switch
+    {
+        "search" => "Move this need into network sourcing?",
+        "fulfil" => "Confirm internal fulfilment from matching local inventory.",
+        "reject" => "Reject this need? The reason will be recorded in its history.",
+        _ => "Cancel this need? The reason will be recorded in its history."
+    };
 
-    private bool _canStartSearch => _need?.Status == BloodNeedStatus.PendingReview;
-    private bool _canFulfil => _need?.Status is BloodNeedStatus.PendingReview or BloodNeedStatus.Searching;
-    private bool _canReject => _need?.Status == BloodNeedStatus.PendingReview;
-    private bool _canCancel => _need?.Status is BloodNeedStatus.PendingReview or BloodNeedStatus.Searching;
-
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
         _isAdmin = CurrentUser.IsInRole(RoleNames.FacilityAdmin);
         _isCreator = CurrentUser.IsInRole(RoleNames.FacilityStaff);
@@ -218,21 +207,32 @@ else
 
     private async Task LoadAsync()
     {
+        _loading = true;
+        _loadError = false;
         try
         {
-            var list = _isAdmin
-                ? await Needs.ListOwnFacilityAsync()
-                : await Needs.GetMineAsync();
-            _need = list.FirstOrDefault(n => n.Id == Id);
-            _notFound = _need is null;
+            _need = await Needs.GetAsync(Id);
+            if (_need is null)
+            {
+                _notFound = true;
+                return;
+            }
+            _notFound = false;
+            _timeline = await Needs.GetTimelineAsync(Id);
+            var stock = (await Inventory.GetOwnInventoryAsync()).FirstOrDefault(item => item.BloodType == _need.BloodType);
+            _lowStock = stock is not null && stock.AvailableUnits <= stock.LowStockThreshold;
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
             _notFound = true;
         }
-        catch (Exception)
+        catch (System.UnauthorizedAccessException)
         {
             _notFound = true;
+        }
+        catch (Exception)
+        {
+            _loadError = true;
         }
         finally
         {
@@ -240,57 +240,58 @@ else
         }
     }
 
-    private async Task PerformAsync(string action)
+    private void Begin(string action)
     {
-        if (_need is null) return;
+        _confirming = action;
+        _reason = string.Empty;
+        _actionError = null;
+        _success = null;
+    }
 
-        if (action is "reject" or "cancel" && string.IsNullOrWhiteSpace(_reason))
-        {
-            _actionError = "invalid";
-            _domainMessage = null;
-            _actionSuccess = false;
-            return;
-        }
+    private void ClearConfirmation()
+    {
+        _confirming = null;
+        _reason = null;
+    }
 
+    private async Task RunActionAsync()
+    {
+        if (_need is null || _confirming is null || _busy) return;
         _busy = true;
         _actionError = null;
-        _domainMessage = null;
-        _actionSuccess = false;
+        _success = null;
         try
         {
-            switch (action)
+            switch (_confirming)
             {
-                case "start-search":
-                    await Needs.StartSearchAsync(new NeedDecisionRequest(_need.Id, null));
-                    break;
-                case "fulfil":
-                    await Needs.FulfilInternallyAsync(new NeedDecisionRequest(_need.Id, null));
-                    break;
-                case "reject":
-                    await Needs.RejectAsync(new NeedDecisionRequest(_need.Id, _reason.Trim()));
-                    break;
-                case "cancel":
-                    await Needs.CancelAsync(new NeedDecisionRequest(_need.Id, _reason.Trim()));
-                    break;
+                case "search": await Needs.StartSearchAsync(new NeedDecisionRequest(_need.Id, null)); break;
+                case "fulfil": await Needs.FulfilInternallyAsync(new NeedDecisionRequest(_need.Id, TrimReason())); break;
+                case "reject": await Needs.RejectAsync(new NeedDecisionRequest(_need.Id, TrimReason())); break;
+                case "cancel": await Needs.CancelAsync(new NeedDecisionRequest(_need.Id, TrimReason())); break;
             }
-
-            _confirming = null;
-            _reason = string.Empty;
-            _actionSuccess = true;
+            ClearConfirmation();
+            await LoadAsync();
+            _success = "The need transition was saved and its current status and timeline have been refreshed.";
+        }
+        catch (BloodLink.Domain.Exceptions.ConcurrencyException)
+        {
+            _actionError = "This need or its inventory changed while you were acting. Refresh the record and try again.";
             await LoadAsync();
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
-            _actionError = "no-access";
+            _actionError = "Your account is not authorized for this action.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _actionError = "domain";
-            _domainMessage = exception.Message;
+            _actionError = "The action could not be completed. The need may have changed; refresh and review its current state.";
+            await LoadAsync();
         }
         finally
         {
             _busy = false;
         }
     }
+
+    private string? TrimReason() => string.IsNullOrWhiteSpace(_reason) ? null : _reason.Trim();
 }

@@ -1,10 +1,9 @@
 @page "/requests/sent"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityAdmin)]
 @inject IBloodRequestService Requests
 @inject ICurrentUserService CurrentUser
-@inject NavigationManager Nav
 
 <PageTitle>Requests Sent | BloodLink</PageTitle>
 
@@ -31,50 +30,76 @@ else if (_error == "load")
         <span>We couldn't load your sent requests right now. Please try again later.</span>
     </AlertMessage>
 }
-else if (_requests.Count == 0)
-{
-    <EmptyState Icon="send" Title="No requests sent yet"
-                Description="Once you request blood from another facility, your sent requests will appear here." />
-}
 else
 {
+    <div class="bl-field bl-filter-control">
+        <label class="bl-label" for="sent-status-filter">Status</label>
+        <InputSelect id="sent-status-filter" class="bl-input bl-select" @bind-Value="_statusFilter">
+            <option value="">All statuses</option>
+            @foreach (var status in Enum.GetValues<BloodRequestStatus>()) { <option value="@status">@BloodDisplay.BloodRequestStatusLabel(status)</option> }
+        </InputSelect>
+    </div>
+    @if (!Filtered.Any())
+    {
+        <EmptyState Icon="send" Title="@(_requests.Count == 0 ? "No requests sent yet" : "No matching requests")"
+                    Description="@(_requests.Count == 0 ? "Requests sent to other facilities will appear here." : "Change the status filter to see other requests.")">
+            @if (_requests.Count == 0) { <a class="bl-btn bl-btn-primary" href="/needs">Review needs</a> }
+        </EmptyState>
+    }
+    else
+    {
     <section class="bl-card">
         <div class="bl-table-wrap">
             <table class="bl-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>To Facility</th>
+                        <th>Request</th>
+                        <th>Source facility</th>
+                        <th>Need</th>
                         <th>Blood Type</th>
-                        <th>Units</th>
+                        <th>Requested / accepted</th>
+                        <th>Urgency</th>
                         <th>Status</th>
+                        <th>Notes</th>
+                        <th>Created / responded / completed</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var request in _requests)
+                    @foreach (var request in Filtered)
                     {
-                        <tr class="bl-tr-click" @onclick="() => Go(request.Id)">
+                        <tr>
                             <td class="bl-mono">@BloodDisplay.ShortId(request.Id)</td>
-                            <td class="bl-strong">Facility @BloodDisplay.ShortId(request.SourceFacilityId)</td>
+                            <td class="bl-strong">@request.SourceFacilityName</td>
+                            <td><a class="bl-inline-link" href="@($"/needs/{request.BloodNeedId}")">Need @BloodDisplay.ShortId(request.BloodNeedId)</a></td>
                             <td><BloodTypeBadge Value="request.BloodType" /></td>
-                            <td class="bl-strong">@request.UnitsRequested</td>
+                            <td class="bl-strong">@request.UnitsRequested / @(request.UnitsAccepted?.ToString() ?? "-")</td>
+                            <td>@BloodDisplay.UrgencyLabel(request.Priority)</td>
                             <td>
                                 <span class="bl-status-badge bl-status-@BloodDisplay.BloodRequestStatusTone(request.Status)">
                                     @BloodDisplay.BloodRequestStatusLabel(request.Status)
                                 </span>
                             </td>
+                            <td>@request.RequestNote @if (!string.IsNullOrWhiteSpace(request.ResponseNote)) { <span> / @request.ResponseNote</span> }</td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(request.CreatedAtUtc)<br />@DateLine(request.RespondedAtUtc, request.FulfilledAtUtc)</td>
+                            <td><a class="bl-link" href="@($"/requests/{request.Id}")">Details <AppIcon Name="chevron-right" Size="12" /></a></td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
     </section>
+    }
 }
 
 @code {
     private bool _loading = true;
     private string? _error;
     private IReadOnlyList<BloodRequestDto> _requests = [];
+    private string _statusFilter = string.Empty;
+    private IEnumerable<BloodRequestDto> Filtered => _requests
+        .Where(request => string.IsNullOrEmpty(_statusFilter) || request.Status.ToString() == _statusFilter)
+        .OrderByDescending(request => request.CreatedAtUtc).ThenBy(request => request.Id);
 
     protected override async Task OnInitializedAsync()
     {
@@ -103,5 +128,6 @@ else
         }
     }
 
-    private void Go(Guid id) => Nav.NavigateTo($"/requests/{id}");
+    private static string DateLine(DateTime? responded, DateTime? fulfilled) =>
+        $"Responded: {(responded is null ? "-" : BloodDisplay.FormatTimestamp(responded.Value))} | Completed: {(fulfilled is null ? "-" : BloodDisplay.FormatTimestamp(fulfilled.Value))}";
 }

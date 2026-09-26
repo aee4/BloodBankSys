@@ -51,6 +51,8 @@ This immediately protects service methods that use these guards. It cannot autho
 
 ## Request workflow service authorization
 
+Phase 5C-B Razor pages use the canonical service reads and preserve service-level authorization. Staff routes are policy-protected, admin routes are admin-policy-protected, and record detail relies on the scoped service rather than a client-provided facility ID. Request mutation controls are rendered only for a service-returned source-facility relationship and eligible status; requester-side cancellation is absent. Inventory-search handoff query data supplies only a need identifier: the UI reloads the authorized need and ignores client-provided quantities, blood type, and redirect destinations. Notification links are mapped from allowlisted record kinds and service-returned references, never arbitrary URLs. These UI checks supplement, and do not replace, server-side authorization.
+
 Need detail is limited to the creating staff member or an active FacilityAdmin at the same approved facility. Need history uses persisted `BloodNeedStatusHistory` and applies the same scope. Request detail and history are limited to active FacilityAdmins at either participating approved facility. Internal fulfilment and external request creation revalidate facility scope in the service; request cancellation, reservation release, and external fulfilment require the active source FacilityAdmin. Notification list/read is recipient-only, and a related-record reference is returned only after record-level access succeeds. These checks apply to direct service calls, not only UI routes.
 
 ## Login, logout and account pages

@@ -2,6 +2,9 @@ using System.Net;
 using BloodLink.Application.Contracts;
 using BloodLink.Web.Components.Facility;
 using BloodLink.Web.Components.Inventory;
+using BloodLink.Web.Components.Needs;
+using BloodLink.Web.Components.Dashboard;
+using BloodLink.Web.Components.Notifications;
 using BloodLink.Web.Components.Requests;
 using BloodLink.Web.Components.Staff;
 using BloodLink.Web.Components.SystemAdmin;
@@ -44,6 +47,39 @@ public sealed class RouteContractTests
             ["/inventory/adjust"] = AuthorizationPolicies.RequireFacilityAdmin,
             ["/inventory/search"] = AuthorizationPolicies.RequireFacilityAdmin
         };
+
+    private static readonly IReadOnlyDictionary<string, (Type Component, string? Policy)> WorkflowRoutes =
+        new Dictionary<string, (Type, string?)>(StringComparer.Ordinal)
+        {
+            ["/needs/new"] = (typeof(SubmitNeed), AuthorizationPolicies.RequireFacilityStaff),
+            ["/needs/mine"] = (typeof(MyNeeds), AuthorizationPolicies.RequireFacilityStaff),
+            ["/needs"] = (typeof(FacilityNeeds), AuthorizationPolicies.RequireFacilityAdmin),
+            ["/needs/{Id:guid}"] = (typeof(NeedDetail), null),
+            ["/requests/sent"] = (typeof(RequestsSent), AuthorizationPolicies.RequireFacilityAdmin),
+            ["/requests/{Id:guid}"] = (typeof(RequestDetail), AuthorizationPolicies.RequireFacilityAdmin),
+            ["/dashboard"] = (typeof(Dashboard), null),
+            ["/notifications"] = (typeof(Notifications), null)
+        };
+
+    [Fact]
+    public void Workflow_routes_have_one_owner_and_expected_authorization()
+    {
+        var routedComponents = typeof(FacilityProfile).Assembly.DefinedTypes
+            .SelectMany(type => type.GetCustomAttributes(typeof(RouteAttribute), inherit: false)
+                .Cast<RouteAttribute>()
+                .Select(route => (route.Template, Component: type.AsType())))
+            .ToList();
+
+        foreach (var (route, expected) in WorkflowRoutes)
+        {
+            var owner = Assert.Single(routedComponents, item => item.Template == route);
+            Assert.Equal(expected.Component, owner.Component);
+            var authorization = Assert.Single(owner.Component
+                .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>());
+            Assert.Equal(expected.Policy, authorization.Policy);
+        }
+    }
 
     [Fact]
     public void Canonical_routes_have_one_owner_and_the_facility_admin_policy()

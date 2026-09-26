@@ -1,9 +1,8 @@
 @page "/needs/new"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireFacilityStaff)]
 @inject IBloodNeedService Needs
-@inject ICurrentUserService CurrentUser
 
 <PageTitle>Submit Blood Need | BloodLink</PageTitle>
 
@@ -14,193 +13,146 @@
     </div>
 </div>
 
-@if (_submitted)
+@if (_created is not null)
 {
-    <section class="bl-card bl-card-pad bl-success-card">
-        <span class="bl-success-icon"><AppIcon Name="circle-check" Size="32" /></span>
-        <h1>Need Submitted</h1>
-        <p>Your blood need has been submitted and is pending review by your Facility Admin.</p>
-        <div class="bl-form-actions">
-            <button class="bl-btn bl-btn-outline" type="button" @onclick="Reset">Submit Another</button>
-            <a class="bl-btn bl-btn-primary" href="/needs/mine">View My Needs</a>
-        </div>
-    </section>
+    <AlertMessage Variant="success" Title="Need submitted">
+        <p>Your request was recorded and is pending facility review.</p>
+        <p>Reference: <a class="bl-inline-link" href="@($"/needs/{_created.Id}")">Need @BloodDisplay.ShortId(_created.Id)</a></p>
+        <a class="bl-btn bl-btn-outline" href="/needs/mine">View my needs</a>
+    </AlertMessage>
 }
 else
 {
-    <div class="bl-page-main">
-        <section class="bl-card bl-card-pad">
-            @if (_urgency == UrgencyLevel.Emergency)
-            {
-                <div class="bl-emergency-note">
-                    <AppIcon Name="zap" Size="18" Filled="true" />
-                    <div>
-                        <strong>Emergency Request</strong>
-                        <span>This need will be flagged as high priority across the platform.</span>
-                    </div>
+    <section class="bl-card bl-card-pad">
+        @if (_error is not null)
+        {
+            <AlertMessage Variant="danger" Title="Couldn't submit the need">
+                <span>@_error</span>
+            </AlertMessage>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="SubmitAsync" FormName="needs-submit">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="bl-validation-summary" />
+            <div class="bl-form-grid">
+                <div class="bl-field">
+                    <label class="bl-label" for="need-blood-type">Blood type <span>*</span></label>
+                    <InputSelect id="need-blood-type" class="bl-input bl-select" @bind-Value="_model.BloodType">
+                        <option value="">Select blood type</option>
+                        @foreach (var value in Enum.GetValues<BloodType>())
+                        {
+                            <option value="@value">@BloodDisplay.BloodTypeLabel(value)</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="@(() => _model.BloodType)" />
                 </div>
-            }
-
-            @if (_error == "no-access")
-            {
-                <AlertMessage Variant="danger" Title="No access">
-                    <span>Only facility staff can submit blood needs. <a class="bl-inline-link" href="/needs">View facility needs</a>.</span>
-                </AlertMessage>
-            }
-            else
-            {
-                <EditForm Model="_model" OnValidSubmit="HandleSubmit" FormName="needs-submit" novalidate>
-                    @if (_error == "load")
+                <div class="bl-field">
+                    <label class="bl-label" for="need-units">Units needed <span>*</span></label>
+                    <InputNumber id="need-units" class="bl-input" @bind-Value="_model.UnitsNeeded" min="1" />
+                    <ValidationMessage For="@(() => _model.UnitsNeeded)" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="need-urgency">Urgency <span>*</span></label>
+                    <InputSelect id="need-urgency" class="bl-input bl-select" @bind-Value="_model.Urgency">
+                        <option value="">Select urgency</option>
+                        @foreach (var value in Enum.GetValues<UrgencyLevel>())
+                        {
+                            <option value="@value">@value</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="@(() => _model.Urgency)" />
+                </div>
+                <div class="bl-field">
+                    <label class="bl-label" for="need-needed-by">Needed by <span>*</span></label>
+                    <InputDate id="need-needed-by" class="bl-input" Type="InputDateType.DateTimeLocal" @bind-Value="_model.NeededBy" />
+                    <ValidationMessage For="@(() => _model.NeededBy)" />
+                </div>
+            </div>
+            <div class="bl-field bl-fieldset-gap">
+                <label class="bl-label" for="need-note">Non-identifying clinical context</label>
+                <InputTextArea id="need-note" class="bl-input bl-textarea" @bind-Value="_model.Note" rows="3" maxlength="1000" />
+                <p class="bl-field-hint">Do not include patient names, record numbers, or other identifying information.</p>
+            </div>
+            <div class="bl-form-actions">
+                <a class="bl-btn bl-btn-outline" href="/needs/mine">Cancel</a>
+                <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
+                    @if (_busy)
                     {
-                        <AlertMessage Variant="danger" Title="Couldn't submit the need">
-                            <span>We couldn't submit your blood need. Please try again later.</span>
-                        </AlertMessage>
+                        <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Submitting...</span>
                     }
-                    @if (_error == "invalid")
+                    else
                     {
-                        <AlertMessage Variant="danger" Title="Check the form">
-                            <span>Please complete all required fields with valid values.</span>
-                        </AlertMessage>
+                        <span>Submit need</span>
                     }
-
-                    <div class="bl-form-grid">
-                        <div class="bl-field">
-                            <label class="bl-label" for="need-blood-type">Blood Type <span>*</span></label>
-                            <InputSelect id="need-blood-type" class="bl-input bl-select" @bind-Value="_model.BloodType" required>
-                                <option value="">Select blood type</option>
-                                @foreach (var type in BloodTypes)
-                                {
-                                    <option value="@type.Value">@type.Label</option>
-                                }
-                            </InputSelect>
-                        </div>
-                        <div class="bl-field">
-                            <label class="bl-label" for="need-units">Units Needed <span>*</span></label>
-                            <InputNumber id="need-units" class="bl-input" @bind-Value="_model.UnitsNeeded" placeholder="e.g. 4" min="1" required />
-                        </div>
-                    </div>
-
-                    <div class="bl-field bl-fieldset-gap">
-                        <label class="bl-label" id="need-urgency-label">Urgency <span>*</span></label>
-                        <div class="bl-toggle-group" role="radiogroup" aria-labelledby="need-urgency-label">
-                            @foreach (var option in UrgencyOptions)
-                            {
-                                <button type="button" class="bl-toggle-btn @(_model.Urgency == option ? $"bl-toggle-{option.ToString().ToLowerInvariant()}" : "")"
-                                        @onclick="() => _model.Urgency = option == _model.Urgency ? null : option">
-                                    @if (option == UrgencyLevel.Emergency)
-                                    {
-                                        <AppIcon Name="zap" Size="13" />
-                                    }
-                                    @option.ToString()
-                                </button>
-                            }
-                        </div>
-                    </div>
-
-                    <div class="bl-field">
-                        <label class="bl-label" for="need-needed-by">Needed By <span>*</span></label>
-                        <InputText id="need-needed-by" class="bl-input" type="datetime-local" @bind-Value="_model.NeededByIso" required />
-                    </div>
-
-                    <div class="bl-field">
-                        <label class="bl-label" for="need-note">Clinical Note
-                            <span class="bl-label-optional">(optional)</span>
-                        </label>
-                        <InputTextArea id="need-note" class="bl-input bl-textarea" @bind-Value="_model.Note" rows="3"
-                                       placeholder="Brief clinical context — do not include patient-identifying information" />
-                        <p class="bl-field-hint">No patient names, ID numbers, or identifying information.</p>
-                    </div>
-
-                    <div class="bl-form-actions">
-                        <a class="bl-btn bl-btn-outline" href="/needs/mine">Cancel</a>
-                        <button class="bl-btn bl-btn-primary" type="submit" disabled="@_busy">
-                            @if (_busy) { <AppIcon Name="loader" Size="16" Class="bl-spin" /> <span>Submitting...</span> }
-                            else { <span>Submit Need</span> }
-                        </button>
-                    </div>
-                </EditForm>
-            }
-        </section>
-    </div>
+                </button>
+            </div>
+        </EditForm>
+    </section>
 }
 
 @code {
     private readonly NeedForm _model = new();
+    private readonly NeedSubmissionGuard _submissionGuard = new();
     private bool _busy;
-    private bool _submitted;
     private string? _error;
-    private bool _isStaff;
+    private BloodNeedDto? _created;
 
-    private UrgencyLevel? _urgency => _model.Urgency;
-
-    private static readonly (BloodType Value, string Label)[] BloodTypes =
-        Enum.GetValues<BloodType>().Select(value => (value, BloodDisplay.BloodTypeLabel(value))).ToArray();
-
-    private static readonly UrgencyLevel[] UrgencyOptions =
-        [UrgencyLevel.Routine, UrgencyLevel.Urgent, UrgencyLevel.Emergency];
-
-    protected override async Task OnInitializedAsync()
+    private async Task SubmitAsync()
     {
-        _isStaff = CurrentUser.IsInRole(RoleNames.FacilityStaff);
-    }
-
-    private void Reset()
-    {
-        _model.BloodType = null;
-        _model.UnitsNeeded = null;
-        _model.Urgency = null;
-        _model.NeededByIso = string.Empty;
-        _model.Note = string.Empty;
-        _submitted = false;
-        _error = null;
-    }
-
-    private async Task HandleSubmit()
-    {
-        if (!_isStaff)
+        if (!_submissionGuard.TryBegin())
         {
-            _error = "no-access";
-            return;
-        }
-        if (_model.BloodType is not { } bloodType || _model.UnitsNeeded is not { } units || units < 1 ||
-            _model.Urgency is not { } urgency || !DateTime.TryParse(_model.NeededByIso, out var neededBy))
-        {
-            _error = "invalid";
             return;
         }
 
         _busy = true;
         _error = null;
+        var submitted = false;
         try
         {
-            await Needs.CreateAsync(new CreateBloodNeedRequest(
-                bloodType,
-                units,
-                urgency,
-                DateTime.SpecifyKind(neededBy, DateTimeKind.Local).ToUniversalTime(),
+            var neededBy = DateTime.SpecifyKind(_model.NeededBy!.Value, DateTimeKind.Local).ToUniversalTime();
+            _created = await Needs.CreateAsync(new CreateBloodNeedRequest(
+                _model.BloodType!.Value,
+                _model.UnitsNeeded,
+                _model.Urgency!.Value,
+                neededBy,
                 string.IsNullOrWhiteSpace(_model.Note) ? null : _model.Note.Trim()));
-            _submitted = true;
+            submitted = true;
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {
-            _error = "no-access";
+            _error = "Your account is not authorized to submit a need.";
+        }
+        catch (ArgumentException)
+        {
+            _error = "Check the entered values and try again.";
         }
         catch (Exception)
         {
-            _error = "load";
+            _error = "The need was not confirmed as submitted. Please retry.";
         }
         finally
         {
+            _submissionGuard.Complete(submitted);
             _busy = false;
         }
     }
 
     private sealed class NeedForm
     {
+        [Required]
         public BloodType? BloodType { get; set; }
-        public int? UnitsNeeded { get; set; }
+
+        [Required]
+        [Range(1, int.MaxValue)]
+        public int UnitsNeeded { get; set; }
+
+        [Required]
         public UrgencyLevel? Urgency { get; set; }
-        public string NeededByIso { get; set; } = string.Empty;
-        public string Note { get; set; } = string.Empty;
+
+        [Required]
+        public DateTime? NeededBy { get; set; }
+
+        [StringLength(1000)]
+        public string? Note { get; set; }
     }
 }

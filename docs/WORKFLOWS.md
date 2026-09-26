@@ -1,5 +1,11 @@
 # Workflows
 
+## Phase 5C-B operational UI
+
+The canonical `/needs/new`, `/needs/mine`, `/needs`, `/needs/{id}`, `/inventory/search`, `/requests/sent`, `/requests/received`, `/requests/{id}`, `/dashboard`, and `/notifications` pages consume the Phase 5C-A scoped services. Staff submit and review their own needs; same-facility admins review needs and inventory context. Persisted status history is shown on detail pages. The inventory search handoff takes its need ID from the route but reloads the authorized need before deriving blood type and quantity; request submission remains authoritative in the service and does not reserve inventory.
+
+Request actions are status- and source-facility-specific: only source FacilityAdmins see accept, reject, fulfil, or cancel controls. Requesting FacilityAdmins are read-only. Dashboards render role-scoped snapshots, and notification navigation is generated only from allowlisted record references returned by the recipient-scoped service. Automated route/page tests cover these contracts; real-browser acceptance evidence is tracked separately in the QA release checklist and must not be inferred from component tests.
+
 ## Facility Registration
 
 ```mermaid
