@@ -23,7 +23,14 @@ public sealed record FacilityDto(
     string RegistrationNumber,
     string Region,
     string City,
-    FacilityStatus Status);
+    string Address,
+    string ContactEmail,
+    string ContactPhone,
+    FacilityStatus Status,
+    string? RejectionReason,
+    DateTime CreatedAtUtc,
+    DateTime? ApprovedAtUtc);
 
 public sealed record FacilityDecisionRequest(Guid FacilityId, string? Reason);
 public sealed record UpdateFacilityRequest(string Address, string ContactEmail, string ContactPhone);
+public sealed record FacilityQueryRequest(FacilityStatus? Status);

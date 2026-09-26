@@ -112,6 +112,20 @@ public sealed class FacilityServiceTests
     }
 
     [Fact]
+    public async Task ListFacilitiesAsync_SystemAdminCanFilterByStatus()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var service = new FacilityService(dbContext, SystemAdminUser("system"));
+
+        var pending = await service.ListFacilitiesAsync(new FacilityQueryRequest(FacilityStatus.Pending));
+        var all = await service.ListFacilitiesAsync(new FacilityQueryRequest(null));
+
+        Assert.All(pending, facility => Assert.Equal(FacilityStatus.Pending, facility.Status));
+        Assert.Contains(all, facility => facility.Id == WorkflowTestSupport.FacilityAId);
+        Assert.Contains(all, facility => facility.Id == WorkflowTestSupport.FacilityCId);
+    }
+
+    [Fact]
     public async Task UpdateOwnFacilityAsync_RequiresOwnApprovedFacilityAdmin()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();

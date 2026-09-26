@@ -1,7 +1,7 @@
 @page "/system/facilities"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireSystemAdmin)]
 @inject IFacilityService Facilities
 @inject ICurrentUserService CurrentUser
 @inject NavigationManager Nav
@@ -11,9 +11,20 @@
 <div class="bl-dash-header">
     <div>
         <h1 class="bl-dash-title">Facility Approvals</h1>
-        <p class="bl-dash-subtitle">Facilities waiting to join the BloodLink network</p>
+        <p class="bl-dash-subtitle">Registered facilities and lifecycle decisions</p>
     </div>
 </div>
+
+<section class="bl-card bl-card-pad">
+    <label class="bl-label" for="facility-status-filter">Status filter</label>
+    <InputSelect id="facility-status-filter" class="bl-input" @bind-Value="_statusFilter" @bind-Value:after="LoadAsync">
+        <option value="">All statuses</option>
+        @foreach (var status in Enum.GetValues<FacilityStatus>())
+        {
+            <option value="@status">@BloodDisplay.FacilityStatusLabel(status)</option>
+        }
+    </InputSelect>
+</section>
 
 @if (_loading)
 {
@@ -34,7 +45,7 @@ else if (_error == "load")
 else if (_facilities.Count == 0)
 {
     <EmptyState Icon="building" Title="No facilities pending review"
-                Description="When facilities register, they'll appear here for approval." />
+                Description="No registered facilities match the current filter." />
 }
 else
 {
@@ -46,6 +57,8 @@ else
                         <th>Name</th>
                         <th>Type</th>
                         <th>Reg. Number</th>
+                        <th>Status</th>
+                        <th>Registered</th>
                         <th>Region</th>
                         <th>City</th>
                         <th>Actions</th>
@@ -58,6 +71,12 @@ else
                             <td class="bl-strong">@facility.Name</td>
                             <td class="bl-muted">@BloodDisplay.FacilityTypeLabel(facility.FacilityType)</td>
                             <td class="bl-mono bl-muted">@facility.RegistrationNumber</td>
+                            <td>
+                                <span class="bl-status-badge bl-status-@BloodDisplay.FacilityStatusTone(facility.Status)">
+                                    @BloodDisplay.FacilityStatusLabel(facility.Status)
+                                </span>
+                            </td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(facility.CreatedAtUtc)</td>
                             <td class="bl-muted">@facility.Region</td>
                             <td class="bl-muted">@facility.City</td>
                             <td class="bl-right">
@@ -75,9 +94,14 @@ else
     private bool _loading = true;
     private string? _error;
     private IReadOnlyList<FacilityDto> _facilities = [];
+    private FacilityStatus? _statusFilter = FacilityStatus.Pending;
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
     {
+        _loading = true;
+        _error = null;
         if (!CurrentUser.IsInRole(RoleNames.SystemAdmin))
         {
             _loading = false;
@@ -87,7 +111,7 @@ else
 
         try
         {
-            _facilities = await Facilities.ListPendingAsync();
+            _facilities = await Facilities.ListFacilitiesAsync(new FacilityQueryRequest(_statusFilter));
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
         {

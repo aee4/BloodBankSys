@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using static BloodLink.Web.Tests.SecurityTestApplication;
 
@@ -31,7 +32,13 @@ public sealed class ProvisioningSecurityTests
             var db = scope.ServiceProvider.GetRequiredService<BloodLinkDbContext>();
             var current = new CurrentUserService(new HttpContextAccessor(), new FixedAuthentication(await app.PrincipalAsync(admin.Id)),
                 scope.ServiceProvider.GetRequiredService<AccountAccessService>());
-            var service = new StaffService(db, current, scope.ServiceProvider.GetRequiredService<IPasswordHasher<ApplicationUser>>());
+            var service = new StaffService(
+                db,
+                current,
+                scope.ServiceProvider.GetRequiredService<IPasswordHasher<ApplicationUser>>(),
+                app.Delivery,
+                scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>(),
+                scope.ServiceProvider.GetRequiredService<IConfiguration>());
             var created = await service.CreateStaffAsync(new CreateStaffRequest("Test", "Staff", "provisioned@example.test", "1234567890"));
             staffUser = await db.Users.SingleAsync(u => u.Id == created.UserId);
             Assert.True(staffUser.MustChangePassword);
@@ -40,10 +47,8 @@ public sealed class ProvisioningSecurityTests
             Assert.Equal(admin.FacilityId, staffUser.FacilityId);
         }
 
-        // The production service does not return/deliver its generated temporary password.
-        // Use the actual recovery HTTP flow with test-only delivery, without replacing its hash.
+        // The production service sends a reset-link setup message through test-only delivery.
         using var client = app.Browser();
-        await PostAsync(client, "/account/forgot-password", "/account/forgot-password", ("Email", staffUser.Email!));
         await app.Delivery.WaitForMessagesAsync(1);
         var code = QueryHelpers.ParseQuery(new Uri(app.Delivery.Messages[0].Url).Query)["code"].ToString();
         Assert.Equal("/account/login?status=password-reset", (await PostAsync(client,

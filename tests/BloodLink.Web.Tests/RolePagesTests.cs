@@ -114,7 +114,7 @@ public sealed class RolePagesTests
     }
 
     [Fact]
-    public async Task Staff_SystemFacilities_ShowsNoAccess()
+    public async Task Staff_SystemFacilities_IsDeniedByPolicy()
     {
         using var app = new SecurityTestApplication();
         using var client = app.Browser();
@@ -124,9 +124,8 @@ public sealed class RolePagesTests
 
         var response = await client.GetAsync("/system/facilities");
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var html = await response.Content.ReadAsStringAsync();
-        Assert.Contains("Only system administrators", html);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/account/access-denied", response.Headers.Location?.OriginalString);
     }
 
     [Fact]

@@ -19,7 +19,7 @@ sequenceDiagram
 
 ## Facility Staff Invitation or Creation
 
-FacilityAdmin creates staff accounts only for their own approved facility. Staff receive temporary credentials and must change the temporary password on first sign-in.
+FacilityAdmin creates staff accounts only for their own approved facility. Staff receive a secure password setup/reset link through the configured delivery provider; the UI never displays a plaintext temporary password.
 
 ## Staff Account Activation
 

@@ -1,21 +1,28 @@
 using System.Net.Mail;
+using System.Text;
 using BloodLink.Application.Contracts;
 using BloodLink.Application.DTOs;
 using BloodLink.Application.Interfaces;
+using BloodLink.Application.Security;
 using BloodLink.Domain.Entities;
 using BloodLink.Domain.Enums;
 using BloodLink.Infrastructure.Data;
 using BloodLink.Infrastructure.Identity;
 using BloodLink.Infrastructure.Services.Common;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace BloodLink.Infrastructure.Services.Staff;
 
 public sealed class StaffService(
     BloodLinkDbContext dbContext,
     ICurrentUserService currentUser,
-    IPasswordHasher<ApplicationUser>? passwordHasher = null) : IStaffService
+    IPasswordHasher<ApplicationUser>? passwordHasher = null,
+    IPasswordResetDelivery? passwordDelivery = null,
+    UserManager<ApplicationUser>? userManager = null,
+    IConfiguration? configuration = null) : IStaffService
 {
     private readonly IPasswordHasher<ApplicationUser> passwordHasher = passwordHasher ?? new PasswordHasher<ApplicationUser>();
 
@@ -34,7 +41,10 @@ public sealed class StaffService(
                     staff.FacilityId,
                     (user.FirstName + " " + user.LastName).Trim(),
                     user.Email ?? string.Empty,
-                    staff.Status))
+                    staff.Status,
+                    staff.CreatedAtUtc,
+                    staff.DeactivatedAtUtc,
+                    staff.StatusReason))
             .ToListAsync(cancellationToken);
     }
 
@@ -47,6 +57,7 @@ public sealed class StaffService(
 
         var email = request.Email.Trim();
         var normalizedEmail = Normalize(email);
+        EnsureCredentialDeliveryAvailable();
 
         if (await UserEmailExistsAsync(email, normalizedEmail, cancellationToken))
         {
@@ -90,6 +101,7 @@ public sealed class StaffService(
         AddAudit("StaffCreated", nameof(FacilityStaff), staff.Id, facilityId, "Facility staff account created.", nowUtc);
         AddNotification(user.Id, NotificationType.AccountCreated, "Account created", "Your BloodLink staff account has been created.", nameof(FacilityStaff), staff.Id, nowUtc);
 
+        await DeliverPasswordResetAsync(user, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ToDto(staff, user);
@@ -101,10 +113,11 @@ public sealed class StaffService(
     public Task ReactivateStaffAsync(ChangeStaffStatusRequest request, CancellationToken cancellationToken = default) =>
         ChangeStaffStatusAsync(request, StaffStatus.Active, isActive: true, requiresReason: false, cancellationToken);
 
-    public async Task ResetTemporaryPasswordAsync(string userId, CancellationToken cancellationToken = default)
+    public async Task<StaffCredentialDeliveryResult> ResetTemporaryPasswordAsync(string userId, CancellationToken cancellationToken = default)
     {
         var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
         await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
+        EnsureCredentialDeliveryAvailable();
 
         var (staff, user) = await LoadOwnStaffAsync(facilityId, userId, cancellationToken);
 
@@ -113,12 +126,12 @@ public sealed class StaffService(
             throw new InvalidOperationException("Inactive staff must be reactivated before resetting credentials.");
         }
 
-        user.PasswordHash = passwordHasher.HashPassword(user, CreateTemporaryPassword());
         user.SecurityStamp = Guid.NewGuid().ToString();
         user.MustChangePassword = true;
-        AddAudit("StaffPasswordReset", nameof(FacilityStaff), staff.Id, facilityId, "Temporary password reset for staff account.", DateTime.UtcNow);
-
+        AddAudit("StaffPasswordReset", nameof(FacilityStaff), staff.Id, facilityId, "Credential reset link requested for staff account.", DateTime.UtcNow);
+        await DeliverPasswordResetAsync(user, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        return new StaffCredentialDeliveryResult(true);
     }
 
     private async Task ChangeStaffStatusAsync(
@@ -247,7 +260,10 @@ public sealed class StaffService(
         RequireText(request.FirstName, nameof(request.FirstName));
         RequireText(request.LastName, nameof(request.LastName));
         RequireEmail(request.Email, nameof(request.Email));
-        RequireText(request.PhoneNumber, nameof(request.PhoneNumber));
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            RequireText(request.PhoneNumber, nameof(request.PhoneNumber));
+        }
     }
 
     private static void RequireText(string value, string fieldName)
@@ -256,6 +272,53 @@ public sealed class StaffService(
         {
             throw new ArgumentException($"{fieldName} is required.");
         }
+    }
+
+    private async Task DeliverPasswordResetAsync(ApplicationUser user, CancellationToken cancellationToken)
+    {
+        EnsureCredentialDeliveryAvailable();
+
+        if (string.IsNullOrWhiteSpace(user.Email))
+        {
+            throw new InvalidOperationException("The staff account does not have an email address for credential delivery.");
+        }
+
+        if (!TryGetPublicOrigin(out var origin))
+        {
+            throw new InvalidOperationException("Credential delivery is not configured.");
+        }
+
+        var token = userManager is null
+            ? WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(Guid.NewGuid().ToString("N")))
+            : WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(await userManager.GeneratePasswordResetTokenAsync(user)));
+        var link = QueryHelpers.AddQueryString(new Uri(origin, "/account/reset-password").AbsoluteUri,
+            new Dictionary<string, string?> { ["email"] = user.Email, ["code"] = token });
+        await passwordDelivery!.SendAsync(user.Email, link, cancellationToken);
+    }
+
+    private void EnsureCredentialDeliveryAvailable()
+    {
+        if (passwordDelivery?.IsConfigured != true || !TryGetPublicOrigin(out _))
+        {
+            throw new InvalidOperationException("Credential delivery is not configured.");
+        }
+    }
+
+    private bool TryGetPublicOrigin(out Uri origin)
+    {
+        origin = null!;
+        if (!Uri.TryCreate(configuration?["Account:PublicOrigin"], UriKind.Absolute, out var candidate)
+            || candidate.Scheme != Uri.UriSchemeHttps
+            || !string.IsNullOrEmpty(candidate.UserInfo)
+            || candidate.AbsolutePath != "/"
+            || !string.IsNullOrEmpty(candidate.Query)
+            || !string.IsNullOrEmpty(candidate.Fragment))
+        {
+            return false;
+        }
+
+        origin = candidate;
+        return true;
     }
 
     private static void RequireEmail(string value, string fieldName)
@@ -273,7 +336,15 @@ public sealed class StaffService(
     }
 
     private static StaffDto ToDto(FacilityStaff staff, ApplicationUser user) =>
-        new(staff.UserId, staff.FacilityId, $"{user.FirstName} {user.LastName}".Trim(), user.Email ?? string.Empty, staff.Status);
+        new(
+            staff.UserId,
+            staff.FacilityId,
+            $"{user.FirstName} {user.LastName}".Trim(),
+            user.Email ?? string.Empty,
+            staff.Status,
+            staff.CreatedAtUtc,
+            staff.DeactivatedAtUtc,
+            staff.StatusReason);
 
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
 

@@ -5,7 +5,7 @@
 | Register a new facility | No | Public onboarding creates pending facility and first admin | No | No |
 | Approve, reject, suspend, restore facility | Yes | No | No | No |
 | Manage own facility profile | View/support | Yes | View | View |
-| Create or deactivate own staff | No by default | Yes | No | No |
+| Create, deactivate, reactivate, or request credential delivery for own staff | No by default | Yes | No | No |
 | View own facility inventory | Platform oversight only | Yes | Yes | Yes |
 | Adjust own facility inventory | No by default | Yes | No | No |
 | Create internal blood need | No | No, reviews submitted needs | Yes | Yes |

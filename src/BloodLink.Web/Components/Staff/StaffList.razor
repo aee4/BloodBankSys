@@ -52,6 +52,7 @@ else
                         <th>Email</th>
                         <th>Role</th>
                         <th>Status</th>
+                        <th>Created</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -66,23 +67,28 @@ else
                                 <span class="bl-status-badge bl-status-@BloodDisplay.StaffStatusTone(member.Status)">
                                     @BloodDisplay.StaffStatusLabel(member.Status)
                                 </span>
+                                @if (!string.IsNullOrWhiteSpace(member.StatusReason))
+                                {
+                                    <div class="bl-muted">@member.StatusReason</div>
+                                }
                             </td>
+                            <td class="bl-muted">@BloodDisplay.FormatTimestamp(member.CreatedAtUtc)</td>
                             <td class="bl-right">
                                 <div class="bl-action-row">
                                     @if (member.Status == StaffStatus.Inactive)
                                     {
-                                        <button class="bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => BeginReactivate(member)'>
+                                        <button class="bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => BeginReactivate(member)' disabled="@_busy">
                                             Reactivate
                                         </button>
                                     }
                                     else
                                     {
-                                        <button class="bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => BeginDeactivate(member)'>
+                                        <button class="bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => BeginDeactivate(member)' disabled="@_busy">
                                             Deactivate
                                         </button>
                                     }
-                                    <button class="bl-btn-sm" type="button" @onclick='() => BeginReset(member)'>
-                                        Reset Password
+                                    <button class="bl-btn-sm" type="button" @onclick='() => BeginReset(member)' disabled="@_busy">
+                                        Send Reset Link
                                     </button>
                                 </div>
                             </td>
@@ -125,7 +131,7 @@ else
                 {
                     "deactivate" => "This staff member will immediately lose access to BloodLink.",
                     "reactivate" => "This staff member's account will regain access to BloodLink.",
-                    _ => "A fresh temporary password will be set. The staff member must change it on next login."
+                    _ => "A secure password-reset link will be delivered through the configured channel. No password will be shown here."
                 })
             </p>
             @if (_confirming == "deactivate")
@@ -137,7 +143,7 @@ else
                 <button class="bl-btn bl-btn-outline" type="button" @onclick="ResetConfirm">Cancel</button>
                 <button class="bl-btn @(_confirming == "deactivate" ? "bl-btn-danger" : "bl-btn-primary")" type="button"
                         @onclick="ConfirmAsync"
-                        disabled='@(_confirming == "deactivate" && string.IsNullOrWhiteSpace(_note))'>
+                        disabled='@(_busy || (_confirming == "deactivate" && string.IsNullOrWhiteSpace(_note)))'>
                     Confirm
                 </button>
             </div>
@@ -225,24 +231,34 @@ else
             return;
         }
 
+        var target = _target;
+        var action = _confirming;
+
         _busy = true;
         _actionError = null;
         _success = null;
         try
         {
-            switch (_confirming)
+            switch (action)
             {
                 case "deactivate":
-                    await Staff.DeactivateStaffAsync(new ChangeStaffStatusRequest(_target.UserId, _note));
-                    _success = $"{_target.FullName} has been deactivated.";
+                    if (string.IsNullOrWhiteSpace(_note))
+                    {
+                        _actionError = "A reason is required before deactivating staff.";
+                        return;
+                    }
+                    await Staff.DeactivateStaffAsync(new ChangeStaffStatusRequest(target.UserId, _note));
+                    _success = $"{target.FullName} has been deactivated.";
                     break;
                 case "reactivate":
-                    await Staff.ReactivateStaffAsync(new ChangeStaffStatusRequest(_target.UserId, _note));
-                    _success = $"{_target.FullName} has been reactivated.";
+                    await Staff.ReactivateStaffAsync(new ChangeStaffStatusRequest(target.UserId, string.Empty));
+                    _success = $"{target.FullName} has been reactivated.";
                     break;
                 case "reset":
-                    await Staff.ResetTemporaryPasswordAsync(_target.UserId);
-                    _success = $"A new temporary password has been set for {_target.FullName}.";
+                    var result = await Staff.ResetTemporaryPasswordAsync(target.UserId);
+                    _success = result.Delivered
+                        ? $"A secure reset link has been sent for {target.FullName}."
+                        : "Credential delivery is not configured. No reset link was sent.";
                     break;
             }
             ResetConfirm();

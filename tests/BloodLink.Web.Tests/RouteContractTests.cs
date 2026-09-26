@@ -3,6 +3,7 @@ using BloodLink.Application.Contracts;
 using BloodLink.Web.Components.Facility;
 using BloodLink.Web.Components.Requests;
 using BloodLink.Web.Components.Staff;
+using BloodLink.Web.Components.SystemAdmin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components;
 
@@ -27,6 +28,13 @@ public sealed class RouteContractTests
         "/requests/in"
     ];
 
+    private static readonly IReadOnlyDictionary<string, Type> SystemAdminRoutes =
+        new Dictionary<string, Type>(StringComparer.Ordinal)
+        {
+            ["/system/facilities"] = typeof(SystemFacilities),
+            ["/system/facilities/{Id:guid}"] = typeof(SystemFacilityDetail)
+        };
+
     [Fact]
     public void Canonical_routes_have_one_owner_and_the_facility_admin_policy()
     {
@@ -50,6 +58,27 @@ public sealed class RouteContractTests
         Assert.DoesNotContain(routedComponents, item => LegacyRoutes.Contains(item.Template, StringComparer.Ordinal));
         Assert.DoesNotContain(routedComponents.GroupBy(item => item.Template, StringComparer.Ordinal),
             group => group.Count() > 1);
+    }
+
+    [Fact]
+    public void System_admin_facility_routes_have_one_owner_and_the_system_policy()
+    {
+        var routedComponents = typeof(FacilityProfile).Assembly.DefinedTypes
+            .SelectMany(type => type.GetCustomAttributes(typeof(RouteAttribute), inherit: false)
+                .Cast<RouteAttribute>()
+                .Select(route => (route.Template, Component: type.AsType())))
+            .ToList();
+
+        foreach (var (route, expectedComponent) in SystemAdminRoutes)
+        {
+            var registration = Assert.Single(routedComponents, item => item.Template == route);
+            Assert.Equal(expectedComponent, registration.Component);
+
+            var authorization = Assert.Single(expectedComponent
+                .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>());
+            Assert.Equal(AuthorizationPolicies.RequireSystemAdmin, authorization.Policy);
+        }
     }
 
     [Fact]
@@ -103,6 +132,20 @@ public sealed class RouteContractTests
         await SecurityTestApplication.LoginAsync(client, user);
 
         var response = await client.GetAsync(route);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Contains("/account/access-denied", response.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task Facility_admin_is_forbidden_from_system_facility_routes()
+    {
+        using var app = new SecurityTestApplication();
+        using var client = app.Browser();
+        var user = await app.SeedAsync(RoleNames.FacilityAdmin);
+        await SecurityTestApplication.LoginAsync(client, user);
+
+        var response = await client.GetAsync("/system/facilities");
 
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         Assert.Contains("/account/access-denied", response.Headers.Location?.OriginalString);

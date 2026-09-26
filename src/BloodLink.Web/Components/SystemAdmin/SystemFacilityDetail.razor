@@ -1,7 +1,7 @@
 @page "/system/facilities/{Id:guid}"
 @layout DashboardLayout
 @rendermode InteractiveServer
-@attribute [Authorize]
+@attribute [Authorize(Policy = AuthorizationPolicies.RequireSystemAdmin)]
 @inject IFacilityService Facilities
 @inject ICurrentUserService CurrentUser
 
@@ -66,6 +66,36 @@ else
                 <p class="bl-label-optional">Facility ID</p>
                 <p class="bl-mono bl-muted">@BloodDisplay.ShortId(_facility.Id)</p>
             </div>
+            <div>
+                <p class="bl-label-optional">Street Address</p>
+                <p class="bl-strong">@_facility.Address</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">Contact Email</p>
+                <p class="bl-strong">@_facility.ContactEmail</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">Contact Phone</p>
+                <p class="bl-strong">@_facility.ContactPhone</p>
+            </div>
+            <div>
+                <p class="bl-label-optional">Registered</p>
+                <p class="bl-strong">@BloodDisplay.FormatTimestamp(_facility.CreatedAtUtc)</p>
+            </div>
+            @if (_facility.ApprovedAtUtc is { } approvedAt)
+            {
+                <div>
+                    <p class="bl-label-optional">Last approved/restored</p>
+                    <p class="bl-strong">@BloodDisplay.FormatTimestamp(approvedAt)</p>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(_facility.RejectionReason))
+            {
+                <div>
+                    <p class="bl-label-optional">Decision Reason</p>
+                    <p class="bl-strong">@_facility.RejectionReason</p>
+                </div>
+            }
         </div>
 
         @if (_canApprove || _canReject || _canSuspend || _canRestore)
@@ -73,25 +103,25 @@ else
             <div class="bl-action-row bl-action-row-top">
                 @if (_canApprove)
                 {
-                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("approve")'>
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("approve")' disabled="@_busy">
                         <AppIcon Name="check" Size="14" /> Approve
                     </button>
                 }
                 @if (_canReject)
                 {
-                    <button class="bl-btn bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => Begin("reject")'>
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-danger" type="button" @onclick='() => Begin("reject")' disabled="@_busy">
                         <AppIcon Name="x" Size="14" /> Reject
                     </button>
                 }
                 @if (_canSuspend)
                 {
-                    <button class="bl-btn bl-btn-sm" type="button" @onclick='() => Begin("suspend")'>
+                    <button class="bl-btn bl-btn-sm" type="button" @onclick='() => Begin("suspend")' disabled="@_busy">
                         <AppIcon Name="x-circle" Size="14" /> Suspend
                     </button>
                 }
                 @if (_canRestore)
                 {
-                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("restore")'>
+                    <button class="bl-btn bl-btn-sm bl-btn-sm-success" type="button" @onclick='() => Begin("restore")' disabled="@_busy">
                         <AppIcon Name="check" Size="14" /> Restore
                     </button>
                 }

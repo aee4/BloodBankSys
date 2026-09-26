@@ -11,7 +11,7 @@
 <div class="bl-dash-header">
     <div>
         <h1 class="bl-dash-title">Facility Profile</h1>
-        <p class="bl-dash-subtitle">Your facility details</p>
+        <p class="bl-dash-subtitle">Your facility details and review status</p>
     </div>
     @if (!_editing)
     {
@@ -120,9 +120,29 @@ else
                     <p class="bl-label-optional">Facility ID</p>
                     <p class="bl-mono bl-muted">@BloodDisplay.ShortId(_facility.Id)</p>
                 </div>
+                <div>
+                    <p class="bl-label-optional">Street Address</p>
+                    <p class="bl-strong">@_facility.Address</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">Contact Email</p>
+                    <p class="bl-strong">@_facility.ContactEmail</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">Contact Phone</p>
+                    <p class="bl-strong">@_facility.ContactPhone</p>
+                </div>
+                <div>
+                    <p class="bl-label-optional">Registered</p>
+                    <p class="bl-strong">@BloodDisplay.FormatTimestamp(_facility.CreatedAtUtc)</p>
+                </div>
             </div>
         </div>
     </section>
+
+    <AlertMessage Variant="@StatusVariant(_facility.Status)" Title="@StatusTitle(_facility.Status)">
+        <span>@StatusMessage(_facility)</span>
+    </AlertMessage>
 
     @if (_saved is { Length: > 0 })
     {
@@ -182,7 +202,12 @@ else
         {
             return;
         }
-        _edit = new EditModel { Address = "", ContactEmail = "", ContactPhone = "" };
+        _edit = new EditModel
+        {
+            Address = _facility.Address,
+            ContactEmail = _facility.ContactEmail,
+            ContactPhone = _facility.ContactPhone
+        };
         _editing = true;
         _actionError = null;
         _saved = null;
@@ -205,7 +230,10 @@ else
                 _edit.ContactEmail,
                 _edit.ContactPhone));
             _editing = false;
-            _facility = await Facilities.GetFacilityAsync(CurrentUser.FacilityId!.Value);
+            if (CurrentUser.FacilityId is { } facilityId)
+            {
+                _facility = await Facilities.GetFacilityAsync(facilityId);
+            }
             _saved = "Facility details updated.";
         }
         catch (BloodLink.Domain.Exceptions.UnauthorizedAccessException)
@@ -235,4 +263,31 @@ else
         [Phone(ErrorMessage = "Enter a valid phone number")]
         public string ContactPhone { get; set; } = "";
     }
+
+    private static string StatusVariant(FacilityStatus status) => status switch
+    {
+        FacilityStatus.Approved => "success",
+        FacilityStatus.Pending => "warning",
+        _ => "danger"
+    };
+
+    private static string StatusTitle(FacilityStatus status) => status switch
+    {
+        FacilityStatus.Pending => "Awaiting system review",
+        FacilityStatus.Approved => "Facility approved",
+        FacilityStatus.Rejected => "Facility rejected",
+        FacilityStatus.Suspended => "Facility suspended",
+        _ => "Facility status"
+    };
+
+    private static string StatusMessage(FacilityDto facility) => facility.Status switch
+    {
+        FacilityStatus.Pending => "Your registration is pending review. Operational workflows remain restricted until approval.",
+        FacilityStatus.Approved => "Your facility can use approved operational workflows.",
+        FacilityStatus.Rejected => string.IsNullOrWhiteSpace(facility.RejectionReason)
+            ? "Your registration was rejected. Contact BloodLink support for next steps."
+            : $"Your registration was rejected: {facility.RejectionReason}",
+        FacilityStatus.Suspended => "Your facility is suspended. Operational workflows are blocked until a system administrator restores access.",
+        _ => "Review this facility status with BloodLink support."
+    };
 }

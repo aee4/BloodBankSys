@@ -33,8 +33,8 @@ else if (_created is not null)
         <span class="bl-panel-icon bl-panel-icon-success">@BloodDisplay.FacilityTypeLabel(FacilityType.Hospital)</span>
         <h2 class="bl-panel-title">Staff account created</h2>
         <p class="bl-panel-desc">
-            A temporary password has been set for <strong>@_created.FullName</strong> (@_created.Email).
-            The staff member must create a new password when they first log in.
+            A secure password setup link has been sent for <strong>@_created.FullName</strong> (@_created.Email).
+            No temporary password is shown or stored in this page.
         </p>
         <div class="bl-panel-actions">
             <a class="bl-btn bl-btn-primary" href="/facility/staff/create"><AppIcon Name="user-plus" Size="14" /> Add Another</a>
@@ -130,7 +130,11 @@ else
         }
         catch (Exception ex)
         {
-            if (ex.Message.Contains("email", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("exist", StringComparison.OrdinalIgnoreCase))
+            if (ex.Message.Contains("delivery", StringComparison.OrdinalIgnoreCase))
+            {
+                _actionError = "Credential delivery is not configured. No staff account was created.";
+            }
+            else if (ex.Message.Contains("email", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("exist", StringComparison.OrdinalIgnoreCase))
             {
                 _actionError = "An account with this email already exists.";
             }

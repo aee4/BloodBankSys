@@ -117,20 +117,27 @@ public sealed class FacilityService(
 
     public async Task<IReadOnlyList<FacilityDto>> ListPendingAsync(CancellationToken cancellationToken = default)
     {
+        return await ListFacilitiesAsync(new FacilityQueryRequest(FacilityStatus.Pending), cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<FacilityDto>> ListFacilitiesAsync(
+        FacilityQueryRequest request,
+        CancellationToken cancellationToken = default)
+    {
         ServiceGuards.RequireSystemAdmin(currentUser);
 
-        return await dbContext.Facilities
-            .AsNoTracking()
-            .Where(facility => facility.Status == FacilityStatus.Pending)
-            .OrderBy(facility => facility.CreatedAtUtc)
-            .Select(facility => new FacilityDto(
-                facility.Id,
-                facility.Name,
-                facility.FacilityType,
-                facility.RegistrationNumber,
-                facility.Region,
-                facility.City,
-                facility.Status))
+        var query = dbContext.Facilities.AsNoTracking();
+
+        if (request.Status is { } status)
+        {
+            WorkflowValidation.EnsureCanonicalEnum(status, nameof(request.Status));
+            query = query.Where(facility => facility.Status == status);
+        }
+
+        return await query
+            .OrderBy(facility => facility.Status)
+            .ThenBy(facility => facility.CreatedAtUtc)
+            .Select(facility => ToDto(facility))
             .ToListAsync(cancellationToken);
     }
 
@@ -339,7 +346,13 @@ public sealed class FacilityService(
             facility.RegistrationNumber,
             facility.Region,
             facility.City,
-            facility.Status);
+            facility.Address,
+            facility.ContactEmail,
+            facility.ContactPhone,
+            facility.Status,
+            facility.RejectionReason,
+            facility.CreatedAtUtc,
+            facility.ApprovedAtUtc);
 
     private static string Normalize(string value) => value.Trim().ToUpperInvariant();
 
