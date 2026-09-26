@@ -42,11 +42,11 @@ public sealed class CancellationAcceptanceTests
         Assert.Equal(1, inventory.ReserveCalls);
         Assert.Equal(0, inventory.ReleaseCalls);
 
-        // Either side may cancel an accepted request, cancelling here as the requesting facility.
-        await requestServiceAsRequester.CancelAsync(request.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requestServiceAsRequester.CancelAsync(request.Id));
+        await requestServiceAsSource.CancelAsync(request.Id);
 
         Assert.Equal(1, inventory.ReleaseCalls);
-        var stored = await requestServiceAsRequester.GetAsync(request.Id);
+        var stored = await requestServiceAsSource.GetAsync(request.Id);
         Assert.Equal(BloodRequestStatus.Cancelled, stored!.Status);
     }
 
@@ -56,11 +56,14 @@ public sealed class CancellationAcceptanceTests
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
         WorkflowTestSupport.AddUser(dbContext, "staff-a", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
         WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
 
         var staffUser = new FakeCurrentUserService { UserId = "staff-a", FacilityId = WorkflowTestSupport.FacilityAId };
         staffUser.RoleList.Add(RoleNames.FacilityStaff);
         var adminAUser = new FakeCurrentUserService { UserId = "admin-a", FacilityId = WorkflowTestSupport.FacilityAId };
         adminAUser.RoleList.Add(RoleNames.FacilityAdmin);
+        var adminBUser = new FakeCurrentUserService { UserId = "admin-b", FacilityId = WorkflowTestSupport.FacilityBId };
+        adminBUser.RoleList.Add(RoleNames.FacilityAdmin);
 
         var inventory = new FakeInventoryService();
 
@@ -74,10 +77,11 @@ public sealed class CancellationAcceptanceTests
         var requestService = new BloodRequestService(dbContext, adminAUser, inventory);
         var request = await requestService.CreateFromNeedAsync(new CreateBloodRequestRequest(
             need.Id, WorkflowTestSupport.FacilityBId, 1, null));
+        var requestServiceAsSource = new BloodRequestService(dbContext, adminBUser, inventory);
 
         // Nothing was ever reserved for a Sent (not yet accepted) request, so cancelling
-        // it should not call release, there is nothing to release.
-        await requestService.CancelAsync(request.Id);
+        // it should not call release, there is nothing to release. The source admin owns cancellation.
+        await requestServiceAsSource.CancelAsync(request.Id);
 
         Assert.Equal(0, inventory.ReleaseCalls);
     }

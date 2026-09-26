@@ -16,7 +16,7 @@ Internal fulfilment is coordinated by `IBloodNeedService` and `IInventoryService
 
 `IBloodRequestService` exposes participant-authorized list/detail and chronological persisted request history. `BloodRequestDto` includes linked need, participant facility IDs and display names, exact blood type, requested/accepted quantities, need urgency, status, notes, and lifecycle timestamps. History includes a safe actor display name and persisted action/status, note, and timestamp.
 
-External request creation rechecks exact-type available inventory at submission; creation does not reserve stock. Acceptance reserves the accepted quantity. Cancellation by an active FacilityAdmin at either participating facility releases accepted reserved units; this matches the existing cancellation acceptance test. Fulfilment is source-admin-only and transfers exactly the accepted quantity.
+External request creation rechecks exact-type available inventory at submission; creation does not reserve stock. Acceptance reserves the accepted quantity. Only an active FacilityAdmin at the approved source facility may cancel an eligible `Sent` or `Accepted` request. The requester cannot cancel. Accepted cancellation releases exactly the accepted reservation atomically; fulfilment is also source-admin-only and transfers exactly the accepted quantity.
 
 `IInventoryService` provides scoped inventory operations, availability search, and the need-consumption operation. `InventoryTransactionDto` carries before/after total and reserved balances for auditable mutations.
 

@@ -2,6 +2,7 @@ using BloodLink.Application.Contracts;
 using BloodLink.Application.DTOs;
 using BloodLink.Domain.Enums;
 using BloodLink.Infrastructure.Services.Requests;
+using Microsoft.EntityFrameworkCore;
 
 namespace BloodLink.Infrastructure.Tests.Services.Requests;
 
@@ -227,22 +228,116 @@ public sealed class BloodRequestServiceTests
     }
 
     [Fact]
-    public async Task CancelAsync_SentCancelsWithoutReleaseAcceptedCancelsWithRelease()
+    public async Task CancelAsync_SourceAdminCancelsSentAndAcceptedWithEvidenceAndOnePartialRelease()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
+        WorkflowTestSupport.AddUser(dbContext, "staff-a", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
         var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
         var sent = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId);
-        var accepted = WorkflowTestSupport.AddRequest(dbContext, Guid.NewGuid(), WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
+        var accepted = WorkflowTestSupport.AddRequest(dbContext, Guid.NewGuid(), WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId,
+            BloodRequestStatus.Accepted, unitsRequested: 5, unitsAccepted: 2);
         var inventory = new FakeInventoryService();
-        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), inventory);
+        var requester = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), inventory);
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId), inventory);
 
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requester.CancelAsync(sent.Id));
         await service.CancelAsync(sent.Id);
         await service.CancelAsync(accepted.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(accepted.Id));
 
         Assert.Equal(1, inventory.ReleaseCalls);
         Assert.All(dbContext.BloodRequests, request => Assert.Equal(BloodRequestStatus.Cancelled, request.Status));
         Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.BloodRequestId == sent.Id && history.FromStatus == BloodRequestStatus.Sent && history.ToStatus == BloodRequestStatus.Cancelled));
         Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.BloodRequestId == accepted.Id && history.FromStatus == BloodRequestStatus.Accepted && history.ToStatus == BloodRequestStatus.Cancelled));
+        Assert.Equal(2, dbContext.AuditLogs.Count(log => log.Action == "BloodRequestCancelled"));
+        Assert.Equal(2, dbContext.Notifications.Count(notification => notification.Title == "Blood request cancelled"));
+        Assert.Equal(BloodNeedStatus.Searching, dbContext.BloodNeeds.Single().Status);
+    }
+
+    [Fact]
+    public async Task CancelAsync_RejectsRequesterUnrelatedStaffSystemAdminAndInactiveSource()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
+        WorkflowTestSupport.AddUser(dbContext, "staff-a", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-c", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityCId);
+        WorkflowTestSupport.AddUser(dbContext, "system", RoleNames.SystemAdmin, null);
+        var unrelatedFacility = await dbContext.Facilities.SingleAsync(item => item.Id == WorkflowTestSupport.FacilityCId);
+        unrelatedFacility.Status = FacilityStatus.Approved;
+        await dbContext.SaveChangesAsync();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var request = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId);
+        var requester = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+        var unrelatedAdmin = CreateService(dbContext, AdminUser("admin-c", WorkflowTestSupport.FacilityCId));
+        var staff = CreateService(dbContext, StaffUser("staff-a", WorkflowTestSupport.FacilityAId));
+        var systemAdmin = new FakeCurrentUserService { UserId = "system" };
+        systemAdmin.RoleList.Add(RoleNames.SystemAdmin);
+        var inactiveSource = AdminUser("admin-b", WorkflowTestSupport.FacilityBId);
+        inactiveSource.IsActive = false;
+        var unauthenticatedSource = AdminUser("admin-b", WorkflowTestSupport.FacilityBId);
+        unauthenticatedSource.IsAuthenticated = false;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requester.CancelAsync(request.Id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => unrelatedAdmin.CancelAsync(request.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => staff.CancelAsync(request.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => CreateService(dbContext, systemAdmin).CancelAsync(request.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => CreateService(dbContext, inactiveSource).CancelAsync(request.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => CreateService(dbContext, unauthenticatedSource).CancelAsync(request.Id));
+
+        Assert.Equal(BloodRequestStatus.Sent, dbContext.BloodRequests.Single().Status);
+        Assert.Empty(dbContext.BloodRequestStatusHistory.Where(history => history.ToStatus == BloodRequestStatus.Cancelled));
+        Assert.Empty(dbContext.AuditLogs.Where(log => log.Action == "BloodRequestCancelled"));
+        Assert.Empty(dbContext.Notifications.Where(notification => notification.Title == "Blood request cancelled"));
+    }
+
+    [Theory]
+    [InlineData(FacilityStatus.Pending)]
+    [InlineData(FacilityStatus.Rejected)]
+    [InlineData(FacilityStatus.Suspended)]
+    public async Task CancelAsync_RejectsSourceAdminWhenSourceFacilityIsNotApproved(FacilityStatus status)
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var request = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId);
+        var source = await dbContext.Facilities.SingleAsync(item => item.Id == WorkflowTestSupport.FacilityBId);
+        source.Status = status;
+        await dbContext.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId)).CancelAsync(request.Id));
+
+        Assert.Equal(BloodRequestStatus.Sent, dbContext.BloodRequests.Single().Status);
+        Assert.Empty(dbContext.BloodRequestStatusHistory.Where(history => history.ToStatus == BloodRequestStatus.Cancelled));
+    }
+
+    [Fact]
+    public async Task CancelAsync_RejectsSentAndAcceptedTerminalStatesWithoutEffects()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
+        var rejectedNeed = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var cancelledNeed = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var fulfilledNeed = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var requests = new[]
+        {
+            WorkflowTestSupport.AddRequest(dbContext, rejectedNeed.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Rejected),
+            WorkflowTestSupport.AddRequest(dbContext, cancelledNeed.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Cancelled),
+            WorkflowTestSupport.AddRequest(dbContext, fulfilledNeed.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Fulfilled)
+        };
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId));
+
+        foreach (var request in requests)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(request.Id));
+        }
+
+        Assert.Empty(dbContext.BloodRequestStatusHistory.Where(history => history.ToStatus == BloodRequestStatus.Cancelled));
+        Assert.Empty(dbContext.AuditLogs.Where(log => log.Action == "BloodRequestCancelled"));
+        Assert.Empty(dbContext.Notifications.Where(notification => notification.Title == "Blood request cancelled"));
     }
 
     [Fact]
@@ -252,7 +347,7 @@ public sealed class BloodRequestServiceTests
         var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
         var accepted = WorkflowTestSupport.AddRequest(dbContext, need.Id, WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, BloodRequestStatus.Accepted, unitsAccepted: 2);
         var inventory = new FakeInventoryService { FailRelease = true };
-        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), inventory);
+        var service = CreateService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId), inventory);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CancelAsync(accepted.Id));
 
@@ -385,4 +480,5 @@ public sealed class BloodRequestServiceTests
         user.RoleList.Add(RoleNames.FacilityStaff);
         return user;
     }
+
 }

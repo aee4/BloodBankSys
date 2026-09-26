@@ -13,6 +13,7 @@
 | Search network availability | No by default | Yes | No | No |
 | Create external request | No | Yes | No | No |
 | Accept, reject, fulfil received request | No | Yes for own facility | No | No |
+| Cancel sent or accepted external request | No | Source facility only | No | No |
 | View notifications | Own | Own | Own | Own |
 | View platform audit/reporting | Yes | Own-facility summary | No | No |
 

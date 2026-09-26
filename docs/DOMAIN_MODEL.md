@@ -64,6 +64,7 @@ The blueprint's canonical model uses `BloodNeed` for internal needs and `BloodRe
 - Owning team: Backend Developer 3 with Backend Developer 2 for inventory effects.
 - Validation responsibility: BloodRequest service.
 - Security/privacy: visible only to involved facilities and authorized platform oversight.
+- Cancellation: only an active FacilityAdmin at the approved source facility may cancel a sent or accepted request; an accepted reservation is released by exactly `UnitsAccepted`.
 
 ## BloodRequestStatusHistory
 

@@ -197,7 +197,7 @@ else
     private bool _canAccept => _isSource && _request is { Status: BloodRequestStatus.Sent };
     private bool _canReject => _isSource && _request is { Status: BloodRequestStatus.Sent };
     private bool _canFulfil => _isSource && _request is { Status: BloodRequestStatus.Accepted };
-    private bool _canCancel => _request is { Status: BloodRequestStatus.Sent or BloodRequestStatus.Accepted };
+    private bool _canCancel => _isSource && _request is { Status: BloodRequestStatus.Sent or BloodRequestStatus.Accepted };
 
     protected override async Task OnInitializedAsync()
     {

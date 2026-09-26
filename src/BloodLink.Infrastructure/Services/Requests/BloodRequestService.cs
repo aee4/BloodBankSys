@@ -245,13 +245,10 @@ public sealed class BloodRequestService(
             var userId = ServiceGuards.RequireAuthenticatedActiveUser(currentUser);
             var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
             await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
-            var bloodRequest = await dbContext.BloodRequests.SingleOrDefaultAsync(item => item.Id == bloodRequestId, cancellationToken)
+            var bloodRequest = await dbContext.BloodRequests.SingleOrDefaultAsync(
+                    item => item.Id == bloodRequestId && item.SourceFacilityId == facilityId,
+                    cancellationToken)
                 ?? throw new InvalidOperationException("The blood request was not found.");
-
-            if (bloodRequest.RequestingFacilityId != facilityId && bloodRequest.SourceFacilityId != facilityId)
-            {
-                throw new UnauthorizedAccessException("You are not authorized to cancel this request.");
-            }
 
             var previousStatus = bloodRequest.Status;
             if (previousStatus == BloodRequestStatus.Accepted)
@@ -267,7 +264,7 @@ public sealed class BloodRequestService(
             bloodRequest.Status = BloodRequestStatus.Cancelled;
             AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Cancelled, "Request cancelled.", userId, nowUtc);
             AddAudit(bloodRequest, userId, "BloodRequestCancelled", "Cancelled blood request.", nowUtc);
-            await AddOppositeSideCancellationNotificationAsync(bloodRequest, facilityId, nowUtc, cancellationToken);
+            await AddOppositeSideCancellationNotificationAsync(bloodRequest, bloodRequest.SourceFacilityId, nowUtc, cancellationToken);
         }, cancellationToken);
     }
 

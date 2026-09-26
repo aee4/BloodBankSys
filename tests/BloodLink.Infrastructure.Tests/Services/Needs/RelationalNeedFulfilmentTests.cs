@@ -123,7 +123,9 @@ public sealed class RelationalNeedFulfilmentTests
         var sourceService = new BloodRequestService(db, source, new InventoryService(db, source));
         await sourceService.AcceptAsync(new RequestResponseRequest(request.Id, 6, "Partial supply."));
         Assert.Equal(6, (await db.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).ReservedUnits);
-        await requests.CancelAsync(request.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requests.CancelAsync(request.Id));
+        await sourceService.CancelAsync(request.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sourceService.CancelAsync(request.Id));
 
         var inventory = await db.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId);
         Assert.Equal((10, 0), (inventory.TotalUnits, inventory.ReservedUnits));
@@ -134,6 +136,164 @@ public sealed class RelationalNeedFulfilmentTests
             && item.ReservedUnitsChange == 6 && item.ReservedAfter == 6);
         Assert.Contains(transactions, item => item.TransactionType == InventoryTransactionType.Release
             && item.ReservedUnitsChange == -6 && item.ReservedAfter == 0);
+        var release = Assert.Single(transactions, item => item.TransactionType == InventoryTransactionType.Release);
+        Assert.Equal((10, 6, 10, 0), (release.TotalBefore, release.ReservedBefore, release.TotalAfter, release.ReservedAfter));
+        Assert.Single(await db.BloodRequestStatusHistory.Where(item => item.BloodRequestId == request.Id
+            && item.ToStatus == BloodRequestStatus.Cancelled).ToListAsync());
+        Assert.Single(await db.AuditLogs.Where(item => item.EntityId == request.Id
+            && item.Action == "BloodRequestCancelled").ToListAsync());
+        Assert.Single(await db.Notifications.Where(item => item.Title == "Blood request cancelled"
+            && item.RecipientUserId == "admin-user").ToListAsync());
+        Assert.Equal(BloodNeedStatus.Searching, (await db.BloodNeeds.SingleAsync(item => item.Id == database.NeedId)).Status);
+    }
+
+    [Fact]
+    public async Task Cancellation_RequestingAdminCannotCancelSentOrAcceptedRequest()
+    {
+        await using var database = await CreateDatabaseAsync();
+        await SetNeedSearchingAsync(database);
+        await using var db = database.CreateContext();
+        var requester = Admin("admin-user", FacilityId);
+        var source = Admin("source-admin", FacilityBId);
+        var requesterService = new BloodRequestService(db, requester, new InventoryService(db, requester));
+        var sourceService = new BloodRequestService(db, source, new InventoryService(db, source));
+        var sent = await requesterService.CreateFromNeedAsync(new CreateBloodRequestRequest(database.NeedId, FacilityBId, 5, null));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requesterService.CancelAsync(sent.Id));
+        await sourceService.AcceptAsync(new RequestResponseRequest(sent.Id, 3, null));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => requesterService.CancelAsync(sent.Id));
+
+        var request = await db.BloodRequests.SingleAsync(item => item.Id == sent.Id);
+        Assert.Equal(BloodRequestStatus.Accepted, request.Status);
+        Assert.Equal(3, (await db.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).ReservedUnits);
+        Assert.Empty(await db.BloodRequestStatusHistory.Where(item => item.BloodRequestId == sent.Id
+            && item.ToStatus == BloodRequestStatus.Cancelled).ToListAsync());
+        Assert.Empty(await db.AuditLogs.Where(item => item.EntityId == sent.Id
+            && item.Action == "BloodRequestCancelled").ToListAsync());
+        Assert.Empty(await db.InventoryTransactions.Where(item => item.ReferenceId == sent.Id
+            && item.TransactionType == InventoryTransactionType.Release).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Cancellation_SourceAdminCancelsSentWithoutChangingInventory()
+    {
+        await using var database = await CreateDatabaseAsync();
+        await SetNeedSearchingAsync(database);
+        await using var db = database.CreateContext();
+        var requester = Admin("admin-user", FacilityId);
+        var source = Admin("source-admin", FacilityBId);
+        var requesterService = new BloodRequestService(db, requester, new InventoryService(db, requester));
+        var sourceService = new BloodRequestService(db, source, new InventoryService(db, source));
+        var request = await requesterService.CreateFromNeedAsync(new CreateBloodRequestRequest(database.NeedId, FacilityBId, 5, null));
+
+        await sourceService.CancelAsync(request.Id);
+
+        Assert.Equal(BloodRequestStatus.Cancelled, (await db.BloodRequests.SingleAsync(item => item.Id == request.Id)).Status);
+        Assert.Equal((10, 0), ((await db.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).TotalUnits,
+            (await db.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).ReservedUnits));
+        Assert.Empty(await db.InventoryTransactions.Where(item => item.ReferenceId == request.Id).ToListAsync());
+        Assert.Single(await db.BloodRequestStatusHistory.Where(item => item.BloodRequestId == request.Id
+            && item.ToStatus == BloodRequestStatus.Cancelled).ToListAsync());
+        Assert.Single(await db.AuditLogs.Where(item => item.EntityId == request.Id
+            && item.Action == "BloodRequestCancelled").ToListAsync());
+        Assert.Single(await db.Notifications.Where(item => item.Title == "Blood request cancelled"
+            && item.RecipientUserId == "admin-user").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Cancellation_InjectedFailureRollsBackReservationAndAllEvidence()
+    {
+        var interceptor = new FailAfterFirstWriteInterceptor();
+        await using var database = await CreateDatabaseAsync(interceptor);
+        await SetNeedSearchingAsync(database);
+        Guid requestId;
+        int historyCount;
+        int auditCount;
+        int notificationCount;
+        await using (var db = database.CreateContext())
+        {
+            var requester = Admin("admin-user", FacilityId);
+            var source = Admin("source-admin", FacilityBId);
+            var requesterService = new BloodRequestService(db, requester, new InventoryService(db, requester));
+            var sourceService = new BloodRequestService(db, source, new InventoryService(db, source));
+            var request = await requesterService.CreateFromNeedAsync(new CreateBloodRequestRequest(database.NeedId, FacilityBId, 5, null));
+            requestId = request.Id;
+            await sourceService.AcceptAsync(new RequestResponseRequest(request.Id, 3, null));
+            historyCount = await db.BloodRequestStatusHistory.CountAsync(item => item.BloodRequestId == request.Id);
+            auditCount = await db.AuditLogs.CountAsync(item => item.EntityId == request.Id);
+            notificationCount = await db.Notifications.CountAsync();
+
+            interceptor.Fail = true;
+            await Assert.ThrowsAsync<DbUpdateException>(() => sourceService.CancelAsync(request.Id));
+        }
+
+        interceptor.Fail = false;
+        await using var verify = database.CreateContext();
+        Assert.Equal(BloodRequestStatus.Accepted, (await verify.BloodRequests.SingleAsync(item => item.Id == requestId)).Status);
+        Assert.Equal(3, (await verify.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).ReservedUnits);
+        Assert.Equal(historyCount, await verify.BloodRequestStatusHistory.CountAsync(item => item.BloodRequestId == requestId));
+        Assert.Equal(auditCount, await verify.AuditLogs.CountAsync(item => item.EntityId == requestId));
+        Assert.Equal(notificationCount, await verify.Notifications.CountAsync());
+        Assert.Single(await verify.InventoryTransactions.Where(item => item.ReferenceId == requestId
+            && item.TransactionType == InventoryTransactionType.Reserve).ToListAsync());
+        Assert.Empty(await verify.InventoryTransactions.Where(item => item.ReferenceId == requestId
+            && item.TransactionType == InventoryTransactionType.Release).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Cancellation_CompetingSourceAdminsCannotReleaseReservationTwice()
+    {
+        await using var database = await CreateDatabaseAsync();
+        await SetNeedSearchingAsync(database);
+        Guid requestId;
+        await using (var db = database.CreateContext())
+        {
+            var requester = Admin("admin-user", FacilityId);
+            var source = Admin("source-admin", FacilityBId);
+            var requesterService = new BloodRequestService(db, requester, new InventoryService(db, requester));
+            var sourceService = new BloodRequestService(db, source, new InventoryService(db, source));
+            var request = await requesterService.CreateFromNeedAsync(new CreateBloodRequestRequest(database.NeedId, FacilityBId, 5, null));
+            requestId = request.Id;
+            await sourceService.AcceptAsync(new RequestResponseRequest(request.Id, 3, null));
+        }
+
+        var gate = new MutationGate();
+        await using var firstDb = database.CreateContext();
+        await using var secondDb = database.CreateContext();
+        var firstAdmin = Admin("source-admin", FacilityBId);
+        var secondAdmin = Admin("source-admin", FacilityBId);
+        var firstService = new BloodRequestService(firstDb, firstAdmin,
+            new PausingInventoryService(new InventoryService(firstDb, firstAdmin), gate, pauseRelease: true));
+        var secondService = new BloodRequestService(secondDb, secondAdmin,
+            new PausingInventoryService(new InventoryService(secondDb, secondAdmin), gate, pauseRelease: true));
+
+        var outcomes = await Task.WhenAll(CancelAsync(firstService, requestId), CancelAsync(secondService, requestId));
+
+        Assert.Single(outcomes, exception => exception is null);
+        Assert.Single(outcomes, exception => exception is BloodLink.Domain.Exceptions.ConcurrencyException);
+        await using var verify = database.CreateContext();
+        Assert.Equal(BloodRequestStatus.Cancelled, (await verify.BloodRequests.SingleAsync(item => item.Id == requestId)).Status);
+        Assert.Equal(0, (await verify.BloodInventory.SingleAsync(item => item.Id == database.SourceInventoryId)).ReservedUnits);
+        Assert.Single(await verify.InventoryTransactions.Where(item => item.ReferenceId == requestId
+            && item.TransactionType == InventoryTransactionType.Release).ToListAsync());
+        Assert.Equal(1, await verify.BloodRequestStatusHistory.CountAsync(item => item.BloodRequestId == requestId
+            && item.ToStatus == BloodRequestStatus.Cancelled));
+        Assert.Equal(1, await verify.AuditLogs.CountAsync(item => item.EntityId == requestId
+            && item.Action == "BloodRequestCancelled"));
+        Assert.Single(await verify.Notifications.Where(item => item.Title == "Blood request cancelled").ToListAsync());
+    }
+
+    private static async Task<Exception?> CancelAsync(IBloodRequestService service, Guid requestId)
+    {
+        try
+        {
+            await service.CancelAsync(requestId);
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
     }
 
     [Fact]
@@ -353,7 +513,7 @@ public sealed class RelationalNeedFulfilmentTests
         }
     }
 
-    private sealed class PausingInventoryService(IInventoryService inner, MutationGate gate) : IInventoryService
+    private sealed class PausingInventoryService(IInventoryService inner, MutationGate gate, bool pauseRelease = false) : IInventoryService
     {
         public Task<IReadOnlyList<InventoryItemDto>> GetOwnInventoryAsync(CancellationToken token = default) => inner.GetOwnInventoryAsync(token);
         public Task AdjustInventoryAsync(InventoryAdjustmentRequest request, CancellationToken token = default) => inner.AdjustInventoryAsync(request, token);
@@ -366,7 +526,11 @@ public sealed class RelationalNeedFulfilmentTests
             await inner.ConsumeForNeedAsync(needId, type, units, reason, deferSave, token);
             await gate.ArriveAsync(token);
         }
-        public Task ReleaseReservationAsync(Guid requestId, bool deferSave = false, CancellationToken token = default) => inner.ReleaseReservationAsync(requestId, deferSave, token);
+        public async Task ReleaseReservationAsync(Guid requestId, bool deferSave = false, CancellationToken token = default)
+        {
+            await inner.ReleaseReservationAsync(requestId, deferSave, token);
+            if (pauseRelease) await gate.ArriveAsync(token);
+        }
         public Task FulfilTransferAsync(Guid requestId, bool deferSave = false, CancellationToken token = default) => inner.FulfilTransferAsync(requestId, deferSave, token);
     }
 

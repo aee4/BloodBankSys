@@ -376,16 +376,10 @@ public sealed class InventoryService : IInventoryService
 
     public async Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
-        // Get the blood request
-        var request = await _context.BloodRequests
-            .FirstOrDefaultAsync(br => br.Id == bloodRequestId, cancellationToken)
-            ?? throw new EntityNotFoundException($"Blood request with ID {bloodRequestId} not found.");
-
         var actingFacilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
-        if (actingFacilityId != request.RequestingFacilityId && actingFacilityId != request.SourceFacilityId)
-        {
-            throw new Domain.Exceptions.UnauthorizedAccessException("Only an administrator at a participating facility may release this request reservation.");
-        }
+        var request = await _context.BloodRequests
+            .FirstOrDefaultAsync(br => br.Id == bloodRequestId && br.SourceFacilityId == actingFacilityId, cancellationToken)
+            ?? throw new EntityNotFoundException($"Blood request with ID {bloodRequestId} not found.");
 
         // Verify request has been accepted (has reserved units)
         if (request.Status != BloodRequestStatus.Accepted || !request.UnitsAccepted.HasValue)

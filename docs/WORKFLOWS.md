@@ -71,7 +71,7 @@ After real-world handover confirmation, source FacilityAdmin marks the request F
 
 ## Cancellation
 
-If an accepted request is cancelled before fulfilment, reservation is released and recorded. No stock transfer occurs. An active FacilityAdmin at either the requesting or source facility may cancel; this is covered by `CancellationAcceptanceTests.Cancel_AfterAccepted_ReleasesTheReservation`, which performs cancellation as the requesting facility admin.
+Only an active FacilityAdmin at the approved source facility may cancel a `Sent` or `Accepted` request. The requesting facility admin, staff, platform admin, inactive users, and admins at non-approved or unrelated facilities cannot cancel. A sent request has no reservation to release. Cancelling an accepted request atomically releases exactly `UnitsAccepted` (including partial acceptance), leaves total stock unchanged, and records inventory, request-history, audit, and requesting-side notification evidence. The linked need remains `Searching` so the requester can choose another source.
 
 Request timelines read immutable request status history oldest-first. Only active FacilityAdmins from either participating approved facility can read request detail or timeline.
 

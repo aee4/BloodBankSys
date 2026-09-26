@@ -741,7 +741,7 @@ public class InventoryServiceTests : IDisposable
     {
         // Arrange
         SeedApprovedFacility(_sourceFacilityId);
-        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_requestingFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_sourceFacilityId);
         SeedApprovedFacility(_requestingFacilityId);
 
         var inventory = new BloodInventory
@@ -789,6 +789,46 @@ public class InventoryServiceTests : IDisposable
 
         Assert.NotNull(transaction);
         Assert.Equal(-30, transaction.ReservedUnitsChange);
+        Assert.Equal((100, 30, 100, 0), (transaction.TotalBefore, transaction.ReservedBefore, transaction.TotalAfter, transaction.ReservedAfter));
+    }
+
+    [Fact]
+    public async Task ReleaseReservationAsync_RequestingFacilityCannotReleaseReservation()
+    {
+        SeedApprovedFacility(_sourceFacilityId);
+        SeedApprovedFacility(_requestingFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_requestingFacilityId);
+        var inventory = new BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = _sourceFacilityId,
+            BloodType = BloodType.OPositive,
+            TotalUnits = 20,
+            ReservedUnits = 5,
+            LowStockThreshold = 1,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+        var request = new BloodRequest
+        {
+            Id = Guid.NewGuid(),
+            BloodNeedId = Guid.NewGuid(),
+            RequestingFacilityId = _requestingFacilityId,
+            SourceFacilityId = _sourceFacilityId,
+            BloodType = BloodType.OPositive,
+            UnitsRequested = 5,
+            UnitsAccepted = 5,
+            Status = BloodRequestStatus.Accepted,
+            RequestedByAdminId = "admin-123",
+            CreatedAtUtc = DateTime.UtcNow
+        };
+        _context.BloodInventory.Add(inventory);
+        _context.BloodRequests.Add(request);
+        await _context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<EntityNotFoundException>(() => _service.ReleaseReservationAsync(request.Id));
+
+        Assert.Equal(5, (await _context.BloodInventory.SingleAsync()).ReservedUnits);
+        Assert.Empty(await _context.InventoryTransactions.ToListAsync());
     }
 
     #endregion
