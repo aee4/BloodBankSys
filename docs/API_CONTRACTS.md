@@ -1,59 +1,30 @@
 # API Contracts
 
-BloodLink currently defines Application-layer contracts only. Full service implementations are deferred.
+Application contracts are implemented by the infrastructure services and exposed to the UI through scoped interfaces. Authorization is enforced by service methods as well as UI policies.
 
-## Facilities
+## Facilities and staff
 
-- `RegisterFacilityRequest`
-- `FacilityDto`
-- `FacilityDecisionRequest`
-- `UpdateFacilityRequest`
-- `IFacilityService`
-
-## Staff
-
-- `CreateStaffRequest`
-- `StaffDto`
-- `ChangeStaffStatusRequest`
-- `IStaffService`
-
-## Inventory
-
-- `InventoryItemDto`
-- `InventoryAdjustmentRequest`
-- `InventoryTransactionDto`
-- `AvailabilitySearchRequest`
-- `AvailabilityResultDto`
-- `IInventoryService`
+Facility contracts include `RegisterFacilityRequest`, `FacilityDto`, `FacilityDecisionRequest`, `UpdateFacilityRequest`, and `IFacilityService`. Staff contracts include `CreateStaffRequest`, `StaffDto`, `ChangeStaffStatusRequest`, and `IStaffService`.
 
 ## Needs
 
-- `CreateBloodNeedRequest`
-- `BloodNeedDto`
-- `NeedDecisionRequest`
-- `IBloodNeedService`
+`IBloodNeedService` supports creation, authorized detail (`GetAsync`), and persisted chronological status history (`GetTimelineAsync`). A creator may read their own need; a FacilityAdmin may read needs from their own approved facility. Detail includes exact blood type, units, urgency, status, reason, creator/time, and same-facility inventory context. Timeline entries come from `BloodNeedStatusHistory`, ordered oldest first with deterministic tie-breaking.
 
-## Requests
+Internal fulfilment is coordinated by `IBloodNeedService` and `IInventoryService.ConsumeForNeedAsync`. It consumes the exact requested units from total stock, leaves reservations unchanged, and writes inventory, need history, audit, and notification evidence atomically.
 
-- `CreateBloodRequestRequest`
-- `BloodRequestDto`
-- `RequestResponseRequest`
-- `FulfilRequestRequest`
-- `RequestTimelineItemDto`
-- `IBloodRequestService`
+## Requests and inventory
 
-## Notifications
+`IBloodRequestService` exposes participant-authorized list/detail and chronological persisted request history. `BloodRequestDto` includes linked need, participant facility IDs and display names, exact blood type, requested/accepted quantities, need urgency, status, notes, and lifecycle timestamps. History includes a safe actor display name and persisted action/status, note, and timestamp.
 
-- `NotificationDto`
-- `UnreadNotificationCountDto`
-- `INotificationService`
+External request creation rechecks exact-type available inventory at submission; creation does not reserve stock. Acceptance reserves the accepted quantity. Cancellation by an active FacilityAdmin at either participating facility releases accepted reserved units; this matches the existing cancellation acceptance test. Fulfilment is source-admin-only and transfers exactly the accepted quantity.
 
-## Dashboards
+`IInventoryService` provides scoped inventory operations, availability search, and the need-consumption operation. `InventoryTransactionDto` carries before/after total and reserved balances for auditable mutations.
 
-- `SystemDashboardDto`
-- `FacilityAdminDashboardDto`
-- `StaffDashboardDto`
-- `IDashboardService`
+## Notifications and dashboards
+
+`INotificationService` returns only the current recipient's notifications. Related-record references are included only for allowlisted entity types and records the recipient is authorized to access; otherwise the reference is null. Mark-read is recipient-scoped and idempotent.
+
+`IDashboardService` returns role-specific snapshots: platform facility/review/request summaries for SystemAdmin; facility-scoped inventory, low-stock, open needs, request counts, unread count and recent activity for FacilityAdmin; and the staff member's need counts/recent needs and unread count for FacilityStaff. Data is service-scoped and deterministically ordered.
 
 ## Status Definitions
 
@@ -61,4 +32,4 @@ BloodNeed statuses: PendingReview, Searching, FulfilledInternally, FulfilledExte
 
 BloodRequest statuses: Sent, Accepted, Rejected, Fulfilled, Cancelled.
 
-Status values must be changed only through service methods that validate the transition and actor.
+Status values are changed only through validated service transitions. Phase 5C Razor pages, routes, and navigation remain follow-on UI work.

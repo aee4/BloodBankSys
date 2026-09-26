@@ -15,6 +15,11 @@ public sealed class InventoryTransactionConfiguration : IEntityTypeConfiguration
             table.HasCheckConstraint("CK_InventoryTransactions_TotalAfter_NonNegative", "[TotalAfter] >= 0");
             table.HasCheckConstraint("CK_InventoryTransactions_ReservedAfter_NonNegative", "[ReservedAfter] >= 0");
             table.HasCheckConstraint("CK_InventoryTransactions_ReservedAfterWithinTotal", "[ReservedAfter] <= [TotalAfter]");
+            table.HasCheckConstraint("CK_InventoryTransactions_TotalBefore_NonNegative", "[TotalBefore] >= 0");
+            table.HasCheckConstraint("CK_InventoryTransactions_ReservedBefore_NonNegative", "[ReservedBefore] >= 0");
+            table.HasCheckConstraint("CK_InventoryTransactions_ReservedBeforeWithinTotal", "[ReservedBefore] <= [TotalBefore]");
+            table.HasCheckConstraint("CK_InventoryTransactions_TotalDeltaMatches", "[TotalAfter] - [TotalBefore] = [TotalUnitsChange]");
+            table.HasCheckConstraint("CK_InventoryTransactions_ReservedDeltaMatches", "[ReservedAfter] - [ReservedBefore] = [ReservedUnitsChange]");
         });
         builder.HasKey(transaction => transaction.Id);
         builder.Property(transaction => transaction.TransactionType).HasConversion<int>().IsRequired();

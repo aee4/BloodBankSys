@@ -22,6 +22,29 @@ public sealed class BloodRequestServiceTests
         Assert.Equal(need.BloodType, result.BloodType);
         Assert.Single(dbContext.BloodRequestStatusHistory.Where(history => history.BloodRequestId == result.Id && history.FromStatus == null && history.ToStatus == BloodRequestStatus.Sent));
         Assert.Single(dbContext.Notifications.Where(notification => notification.RecipientUserId == "admin-b" && notification.NotificationType == NotificationType.NewExternalRequest));
+        Assert.Equal("Facility A", result.RequestingFacilityName);
+        Assert.Equal("Facility B", result.SourceFacilityName);
+        Assert.Equal(need.Urgency, result.Priority);
+        Assert.Equal(0, dbContext.BloodInventory.Count());
+        var timeline = await service.GetTimelineAsync(result.Id);
+        Assert.Single(timeline);
+        Assert.Equal(BloodRequestStatus.Sent, timeline[0].ToStatus);
+        Assert.Equal("admin-a@example.test", timeline[0].ActorDisplayName);
+    }
+
+    [Fact]
+    public async Task CreateFromNeedAsync_RechecksCurrentExactTypeAvailability()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", BloodNeedStatus.Searching);
+        var inventory = new FakeInventoryService { NoAvailability = true };
+        var service = CreateService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId), inventory);
+
+        await Assert.ThrowsAsync<BloodLink.Domain.Exceptions.InsufficientInventoryException>(() =>
+            service.CreateFromNeedAsync(new CreateBloodRequestRequest(need.Id, WorkflowTestSupport.FacilityBId, 2, null)));
+
+        Assert.Empty(dbContext.BloodRequests);
+        Assert.Empty(dbContext.BloodRequestStatusHistory);
     }
 
     [Fact]

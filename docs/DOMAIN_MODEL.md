@@ -41,8 +41,8 @@ The blueprint's canonical model uses `BloodNeed` for internal needs and `BloodRe
 ## InventoryTransaction
 
 - Purpose: immutable audit of inventory and reservation changes.
-- Important fields: BloodInventoryId, TransactionType, TotalUnitsChange, ReservedUnitsChange, TotalAfter, ReservedAfter, Reason, ReferenceType, ReferenceId, PerformedByUserId, CreatedAtUtc.
-- Relationships: belongs to BloodInventory and may reference a BloodRequest or adjustment.
+- Important fields: BloodInventoryId, TransactionType, TotalUnitsChange, ReservedUnitsChange, TotalBefore, ReservedBefore, TotalAfter, ReservedAfter, Reason, ReferenceType, ReferenceId, PerformedByUserId, CreatedAtUtc.
+- Relationships: belongs to BloodInventory and may reference a BloodRequest, BloodNeed, or adjustment.
 - Owning team: Backend Developer 2.
 - Validation responsibility: Inventory service.
 - Security/privacy: never hard-delete; reason must avoid patient-identifying details.
@@ -73,6 +73,14 @@ The blueprint's canonical model uses `BloodNeed` for internal needs and `BloodRe
 - Owning team: Backend Developer 3.
 - Validation responsibility: BloodRequest service.
 - Security/privacy: notes must be safe summaries.
+
+## BloodNeedStatusHistory
+
+- Purpose: immutable, queryable evidence for the need timeline; audit summaries are not parsed to reconstruct state.
+- Important fields: BloodNeedId, FromStatus, ToStatus, Note, ChangedByUserId, ChangedAtUtc.
+- Relationships: restrictive references to BloodNeed and the changing user; indexed by need and time.
+- Owning team: Backend Developer 3, with Database Developer 1 for schema.
+- Security/privacy: detail/timeline access follows need ownership and facility scope; notes must be safe summaries.
 
 ## Notification
 

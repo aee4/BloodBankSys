@@ -13,6 +13,7 @@ public sealed class BloodLinkDbContext(DbContextOptions<BloodLinkDbContext> opti
     public DbSet<BloodInventory> BloodInventory => Set<BloodInventory>();
     public DbSet<InventoryTransaction> InventoryTransactions => Set<InventoryTransaction>();
     public DbSet<BloodNeed> BloodNeeds => Set<BloodNeed>();
+    public DbSet<BloodNeedStatusHistory> BloodNeedStatusHistory => Set<BloodNeedStatusHistory>();
     public DbSet<BloodRequest> BloodRequests => Set<BloodRequest>();
     public DbSet<BloodRequestStatusHistory> BloodRequestStatusHistory => Set<BloodRequestStatusHistory>();
     public DbSet<Notification> Notifications => Set<Notification>();

@@ -25,7 +25,9 @@ public sealed class BloodRequestConfiguration : IEntityTypeConfiguration<BloodRe
         builder.Property(request => request.RequestNote).HasMaxLength(1000);
         builder.Property(request => request.ResponseNote).HasMaxLength(1000);
         builder.Property(request => request.RowVersion).IsRowVersion();
-        builder.HasIndex(request => request.BloodNeedId);
+        builder.HasIndex(request => request.BloodNeedId)
+            .IsUnique()
+            .HasFilter("[Status] IN (0, 1)");
         builder.HasIndex(request => new { request.RequestingFacilityId, request.Status });
         builder.HasIndex(request => new { request.SourceFacilityId, request.Status });
         builder.HasOne<BloodNeed>().WithMany().HasForeignKey(request => request.BloodNeedId).OnDelete(DeleteBehavior.NoAction);

@@ -12,6 +12,8 @@ erDiagram
     Facilities ||--o{ BloodNeeds : raises
     AspNetUsers ||--o{ BloodNeeds : requested_by
     BloodNeeds ||--o{ BloodRequests : produces
+    BloodNeeds ||--o{ BloodNeedStatusHistory : tracks
+    AspNetUsers ||--o{ BloodNeedStatusHistory : changes
     Facilities ||--o{ BloodRequests : requesting
     Facilities ||--o{ BloodRequests : source
     BloodRequests ||--o{ BloodRequestStatusHistory : tracks

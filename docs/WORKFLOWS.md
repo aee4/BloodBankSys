@@ -31,7 +31,13 @@ FacilityStaff checks exact blood type stock. If insufficient, staff creates a Bl
 
 ## Insufficient-Stock Escalation
 
-FacilityAdmin reviews PendingReview needs and may reject, cancel, fulfil internally, or move the need to Searching.
+FacilityAdmin reviews PendingReview needs and may reject, cancel, fulfil internally, or move the need to Searching. Every successful transition records immutable need status history, an audit event, and appropriate in-app notifications in the same persistence unit.
+
+Need detail is available to its creating staff member and an active FacilityAdmin at the same approved facility. Its chronological timeline is projected from persisted `BloodNeedStatusHistory`, never synthesized from current status.
+
+## Internal Fulfilment
+
+An authorized FacilityAdmin may fulfil a need only from `PendingReview` or `Searching`, for a positive exact quantity and matching blood type. The service verifies `TotalUnits - ReservedUnits >= UnitsNeeded`, consumes exactly `UnitsNeeded` from `TotalUnits`, and leaves `ReservedUnits` unchanged. Inventory, immutable before/after transaction evidence, need status/history, audit, and creator notification commit atomically; concurrency conflicts leave no partial result.
 
 ## Availability Search
 
@@ -49,6 +55,8 @@ flowchart LR
     Source --> Cancelled[Cancelled]
 ```
 
+Request submission rechecks exact-type availability for the selected approved source immediately before persistence, and does not reserve stock. A filtered unique index also prevents multiple active requests for one need.
+
 ## Approval
 
 Source FacilityAdmin accepts only if current AvailableUnits are sufficient. Acceptance atomically increases ReservedUnits and creates an inventory reservation transaction.
@@ -63,7 +71,9 @@ After real-world handover confirmation, source FacilityAdmin marks the request F
 
 ## Cancellation
 
-If an accepted request is cancelled before fulfilment, reservation is released and recorded. No stock transfer occurs.
+If an accepted request is cancelled before fulfilment, reservation is released and recorded. No stock transfer occurs. An active FacilityAdmin at either the requesting or source facility may cancel; this is covered by `CancellationAcceptanceTests.Cancel_AfterAccepted_ReleasesTheReservation`, which performs cancellation as the requesting facility admin.
+
+Request timelines read immutable request status history oldest-first. Only active FacilityAdmins from either participating approved facility can read request detail or timeline.
 
 ## Inventory Adjustment
 

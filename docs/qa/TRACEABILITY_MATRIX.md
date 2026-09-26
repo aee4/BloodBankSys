@@ -1,5 +1,9 @@
 # BloodLink Requirements & Workflow Traceability Matrix
 
+## Phase 5C-A contract evidence
+
+The backend prerequisite adds focused service/acceptance tests for authorized need reads and persisted timelines, exact internal inventory consumption, rollback behavior, availability recheck, participant-scoped request timelines, safe notification references, and role-scoped dashboard data. SQL Server LocalDB-only atomicity/concurrency proof lives in `tests/BloodLink.Relational.Tests` and is intentionally outside the default solution test run. This is backend contract coverage, not evidence that Phase 5C Razor screens are complete.
+
 **Document Version:** 1.0.0  
 **Date:** 16 August 2026  
 **Author:** Jennifer Banibensu, DevOps & QA/Test Engineer (Student ID: 22013023)  

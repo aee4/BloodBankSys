@@ -71,6 +71,18 @@ public sealed class BloodRequestService(
             throw new InvalidOperationException("Only one non-final request may exist for a blood need.");
         }
 
+        var availability = await inventoryService.SearchAvailabilityAsync(
+            new AvailabilitySearchRequest(need.BloodType, request.UnitsRequested), cancellationToken);
+        if (!availability.Any(item => item.FacilityId == request.SourceFacilityId && item.AvailableUnits >= request.UnitsRequested))
+        {
+            throw new BloodLink.Domain.Exceptions.InsufficientInventoryException("The selected source no longer has enough available units for this request.");
+        }
+
+        var sourceFacilityName = await dbContext.Facilities.AsNoTracking()
+            .Where(item => item.Id == request.SourceFacilityId).Select(item => item.Name).SingleAsync(cancellationToken);
+        var requestingFacilityName = await dbContext.Facilities.AsNoTracking()
+            .Where(item => item.Id == requestingFacilityId).Select(item => item.Name).SingleAsync(cancellationToken);
+
         var nowUtc = DateTime.UtcNow;
         var bloodRequest = new BloodRequest
         {
@@ -86,23 +98,19 @@ public sealed class BloodRequestService(
             CreatedAtUtc = nowUtc
         };
 
-        dbContext.BloodRequests.Add(bloodRequest);
-        AddHistory(bloodRequest.Id, null, BloodRequestStatus.Sent, bloodRequest.RequestNote, userId, nowUtc);
+        await ExecuteAtomicTransitionAsync(async () =>
+        {
+            need.UpdatedAtUtc = nowUtc;
+            dbContext.BloodRequests.Add(bloodRequest);
+            AddHistory(bloodRequest.Id, null, BloodRequestStatus.Sent, bloodRequest.RequestNote, userId, nowUtc);
+            AddAudit(bloodRequest, userId, "BloodRequestCreated", "Created external blood request.", nowUtc);
+            await WorkflowNotifications.AddForActiveFacilityAdminsAsync(
+                dbContext, request.SourceFacilityId, NotificationType.NewExternalRequest,
+                "New external blood request", "Another approved facility sent a blood request for review.",
+                nameof(BloodRequest), bloodRequest.Id, nowUtc, cancellationToken);
+        }, cancellationToken);
 
-        await WorkflowNotifications.AddForActiveFacilityAdminsAsync(
-            dbContext,
-            request.SourceFacilityId,
-            NotificationType.NewExternalRequest,
-            "New external blood request",
-            "Another approved facility sent a blood request for review.",
-            nameof(BloodRequest),
-            bloodRequest.Id,
-            nowUtc,
-            cancellationToken);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return ToDto(bloodRequest);
+        return ToDto(bloodRequest, requestingFacilityName, sourceFacilityName, need.Urgency);
     }
 
     public async Task<IReadOnlyList<BloodRequestDto>> ListSentAsync(CancellationToken cancellationToken = default)
@@ -110,12 +118,8 @@ public sealed class BloodRequestService(
         var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
         await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
 
-        return await dbContext.BloodRequests
-            .AsNoTracking()
-            .Where(request => request.RequestingFacilityId == facilityId)
-            .OrderByDescending(request => request.CreatedAtUtc)
-            .Select(request => new BloodRequestDto(request.Id, request.BloodNeedId, request.RequestingFacilityId, request.SourceFacilityId, request.BloodType, request.UnitsRequested, request.UnitsAccepted, request.Status))
-            .ToListAsync(cancellationToken);
+        return await ProjectRequests(dbContext.BloodRequests.AsNoTracking()
+            .Where(request => request.RequestingFacilityId == facilityId), cancellationToken);
     }
 
     public async Task<IReadOnlyList<BloodRequestDto>> ListReceivedAsync(CancellationToken cancellationToken = default)
@@ -123,12 +127,8 @@ public sealed class BloodRequestService(
         var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
         await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
 
-        return await dbContext.BloodRequests
-            .AsNoTracking()
-            .Where(request => request.SourceFacilityId == facilityId)
-            .OrderByDescending(request => request.CreatedAtUtc)
-            .Select(request => new BloodRequestDto(request.Id, request.BloodNeedId, request.RequestingFacilityId, request.SourceFacilityId, request.BloodType, request.UnitsRequested, request.UnitsAccepted, request.Status))
-            .ToListAsync(cancellationToken);
+        return await ProjectRequests(dbContext.BloodRequests.AsNoTracking()
+            .Where(request => request.SourceFacilityId == facilityId), cancellationToken);
     }
 
     public async Task<BloodRequestDto?> GetAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
@@ -136,8 +136,7 @@ public sealed class BloodRequestService(
         var facilityId = ServiceGuards.RequireFacilityRole(currentUser, RoleNames.FacilityAdmin);
         await ServiceGuards.RequireApprovedFacilityAsync(dbContext, facilityId, cancellationToken);
 
-        var bloodRequest = await dbContext.BloodRequests
-            .AsNoTracking()
+        var bloodRequest = await dbContext.BloodRequests.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == bloodRequestId, cancellationToken);
 
         if (bloodRequest is null)
@@ -150,7 +149,25 @@ public sealed class BloodRequestService(
             throw new UnauthorizedAccessException("You are not authorized to view this request.");
         }
 
-        return ToDto(bloodRequest);
+        return await ProjectRequest(bloodRequestId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RequestTimelineItemDto>> GetTimelineAsync(Guid bloodRequestId, CancellationToken cancellationToken = default)
+    {
+        if (await GetAsync(bloodRequestId, cancellationToken) is null)
+        {
+            return [];
+        }
+
+        return await (
+                from history in dbContext.BloodRequestStatusHistory.AsNoTracking()
+                join actor in dbContext.Users.AsNoTracking() on history.ChangedByUserId equals actor.Id
+                where history.BloodRequestId == bloodRequestId
+                orderby history.ChangedAtUtc, history.Id
+                select new RequestTimelineItemDto(
+                    history.FromStatus, history.ToStatus,
+                    DisplayName(actor.FirstName, actor.LastName, actor.Email), history.Note, history.ChangedAtUtc))
+            .ToListAsync(cancellationToken);
     }
 
     public async Task AcceptAsync(RequestResponseRequest request, CancellationToken cancellationToken = default)
@@ -215,6 +232,7 @@ public sealed class BloodRequestService(
         bloodRequest.RespondedAtUtc = nowUtc;
         bloodRequest.ResponseNote = request.ResponseNote.Trim();
         AddHistory(bloodRequest.Id, previousStatus, BloodRequestStatus.Rejected, bloodRequest.ResponseNote, userId, nowUtc);
+        AddAudit(bloodRequest, userId, "BloodRequestRejected", "Rejected external blood request.", nowUtc);
         await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestResponse, "Blood request rejected", "A source facility rejected your blood request.", nowUtc, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -280,9 +298,32 @@ public sealed class BloodRequestService(
             bloodRequest.FulfilledAtUtc = nowUtc;
             need.Status = BloodNeedStatus.FulfilledExternally;
             need.UpdatedAtUtc = nowUtc;
+            dbContext.BloodNeedStatusHistory.Add(new BloodNeedStatusHistory
+            {
+                Id = Guid.NewGuid(),
+                BloodNeedId = need.Id,
+                FromStatus = BloodNeedStatus.Searching,
+                ToStatus = BloodNeedStatus.FulfilledExternally,
+                Note = TrimToNull(request.Note),
+                ChangedByUserId = userId,
+                ChangedAtUtc = nowUtc
+            });
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                ActorUserId = userId,
+                Action = "BloodNeedStatusChanged",
+                EntityType = nameof(BloodNeed),
+                EntityId = need.Id,
+                FacilityId = need.FacilityId,
+                Summary = "Blood need status changed from Searching to FulfilledExternally.",
+                CreatedAtUtc = nowUtc
+            });
             AddHistory(bloodRequest.Id, BloodRequestStatus.Accepted, BloodRequestStatus.Fulfilled, TrimToNull(request.Note), userId, nowUtc);
             AddAudit(bloodRequest, userId, "BloodRequestFulfilled", $"Transferred {bloodRequest.UnitsAccepted} units.", nowUtc);
             await AddRequestingSideNotificationAsync(bloodRequest, NotificationType.RequestFulfilled, "Blood request fulfilled", "A source facility marked your blood request fulfilled.", nowUtc, cancellationToken);
+            WorkflowNotifications.AddForUsers(dbContext, [need.RequestedByUserId], NotificationType.FacilityDecision,
+                "Blood need fulfilled externally", "Your need was fulfilled by an external facility.", nameof(BloodNeed), need.Id, nowUtc);
         }, cancellationToken);
     }
 
@@ -341,7 +382,7 @@ public sealed class BloodRequestService(
             Action = action,
             EntityType = nameof(BloodRequest),
             EntityId = request.Id,
-            FacilityId = request.SourceFacilityId,
+            FacilityId = currentUser.FacilityId ?? request.SourceFacilityId,
             Summary = summary,
             CreatedAtUtc = nowUtc
         });
@@ -430,16 +471,35 @@ public sealed class BloodRequestService(
         });
     }
 
-    private static BloodRequestDto ToDto(BloodRequest request) =>
-        new(
-            request.Id,
-            request.BloodNeedId,
-            request.RequestingFacilityId,
-            request.SourceFacilityId,
-            request.BloodType,
-            request.UnitsRequested,
-            request.UnitsAccepted,
-            request.Status);
+    private async Task<IReadOnlyList<BloodRequestDto>> ProjectRequests(
+        IQueryable<BloodRequest> requests,
+        CancellationToken cancellationToken) =>
+        await (from request in requests
+               join need in dbContext.BloodNeeds.AsNoTracking() on request.BloodNeedId equals need.Id
+               join requesting in dbContext.Facilities.AsNoTracking() on request.RequestingFacilityId equals requesting.Id
+               join source in dbContext.Facilities.AsNoTracking() on request.SourceFacilityId equals source.Id
+               orderby request.CreatedAtUtc descending, request.Id
+               select new BloodRequestDto(
+                   request.Id, request.BloodNeedId, request.RequestingFacilityId, requesting.Name,
+                   request.SourceFacilityId, source.Name, request.BloodType, request.UnitsRequested,
+                   request.UnitsAccepted, need.Urgency, request.Status, request.RequestNote,
+                   request.ResponseNote, request.CreatedAtUtc, request.RespondedAtUtc, request.FulfilledAtUtc))
+        .ToListAsync(cancellationToken);
+
+    private async Task<BloodRequestDto?> ProjectRequest(Guid requestId, CancellationToken cancellationToken) =>
+        (await ProjectRequests(dbContext.BloodRequests.AsNoTracking().Where(request => request.Id == requestId), cancellationToken))
+        .SingleOrDefault();
+
+    private static BloodRequestDto ToDto(BloodRequest request, string requestingName, string sourceName, UrgencyLevel priority) =>
+        new(request.Id, request.BloodNeedId, request.RequestingFacilityId, requestingName, request.SourceFacilityId,
+            sourceName, request.BloodType, request.UnitsRequested, request.UnitsAccepted, priority, request.Status,
+            request.RequestNote, request.ResponseNote, request.CreatedAtUtc, request.RespondedAtUtc, request.FulfilledAtUtc);
+
+    private static string DisplayName(string? firstName, string? lastName, string? email)
+    {
+        var name = string.Join(" ", new[] { firstName, lastName }.Where(value => !string.IsNullOrWhiteSpace(value))).Trim();
+        return name.Length > 0 ? name : email ?? "Facility user";
+    }
 
     private static string? TrimToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

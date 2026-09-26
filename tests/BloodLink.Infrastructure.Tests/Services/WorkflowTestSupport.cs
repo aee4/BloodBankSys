@@ -142,6 +142,7 @@ internal sealed class FakeInventoryService : IInventoryService
     public bool FailReserve { get; set; }
     public bool FailRelease { get; set; }
     public bool FailFulfil { get; set; }
+    public bool NoAvailability { get; set; }
 
     public Task<IReadOnlyList<InventoryItemDto>> GetOwnInventoryAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<InventoryItemDto>>([]);
@@ -156,7 +157,10 @@ internal sealed class FakeInventoryService : IInventoryService
         Task.FromResult<IReadOnlyList<LowStockAlertDto>>([]);
 
     public Task<IReadOnlyList<AvailabilityResultDto>> SearchAvailabilityAsync(AvailabilitySearchRequest request, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<AvailabilityResultDto>>([]);
+        Task.FromResult<IReadOnlyList<AvailabilityResultDto>>(NoAvailability ? [] :
+        new[] { WorkflowTestSupport.FacilityAId, WorkflowTestSupport.FacilityBId, WorkflowTestSupport.FacilityCId }
+            .Select(id => new AvailabilityResultDto(id, "Test Facility", FacilityType.Hospital, "", "", request.BloodType,
+                request.MinimumAvailableUnits, DateTime.UtcNow)).ToArray());
 
     public int? UnitsReserved { get; private set; }
 
@@ -166,6 +170,9 @@ internal sealed class FakeInventoryService : IInventoryService
         UnitsReserved = unitsToReserve;
         return FailReserve ? Task.FromException(new InvalidOperationException("reserve failed")) : Task.CompletedTask;
     }
+
+    public Task ConsumeForNeedAsync(Guid bloodNeedId, BloodType bloodType, int unitsToConsume, string reason, bool deferSave = false, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 
     public Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {

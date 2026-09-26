@@ -2,6 +2,9 @@ using BloodLink.Application.Contracts;
 using BloodLink.Application.DTOs;
 using BloodLink.Domain.Enums;
 using BloodLink.Infrastructure.Services.Needs;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace BloodLink.Infrastructure.Tests.Services.Needs;
 
@@ -25,6 +28,10 @@ public sealed class BloodNeedServiceTests
         Assert.Equal("staff-a", storedNeed.RequestedByUserId);
         Assert.Single(dbContext.Notifications.Where(notification => notification.RecipientUserId == "admin-a" && notification.NotificationType == NotificationType.NewNeed));
         Assert.DoesNotContain(dbContext.Notifications, notification => notification.RecipientUserId == "admin-b");
+        var history = Assert.Single(dbContext.BloodNeedStatusHistory);
+        Assert.Null(history.FromStatus);
+        Assert.Equal(BloodNeedStatus.PendingReview, history.ToStatus);
+        Assert.Single(dbContext.AuditLogs.Where(log => log.EntityId == storedNeed.Id));
     }
 
     [Theory]
@@ -132,6 +139,37 @@ public sealed class BloodNeedServiceTests
     }
 
     [Fact]
+    public async Task GetAsyncAndTimelineAsync_AuthorizeCreatorAndSameFacilityAdmin()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        WorkflowTestSupport.AddUser(dbContext, "staff-a", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "staff-other", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
+        WorkflowTestSupport.AddUser(dbContext, "admin-b", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityBId);
+        var staff = StaffUser("staff-a", WorkflowTestSupport.FacilityAId);
+        var creatorService = new BloodNeedService(dbContext, staff);
+        var need = await creatorService.CreateAsync(new CreateBloodNeedRequest(
+            BloodType.APositive, 3, UrgencyLevel.Urgent, DateTime.UtcNow.AddHours(4), "Non-identifying reference"));
+        var adminService = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+        await adminService.StartSearchAsync(new NeedDecisionRequest(need.Id, null));
+
+        var detail = await creatorService.GetAsync(need.Id);
+        var timeline = await creatorService.GetTimelineAsync(need.Id);
+        Assert.Equal(BloodNeedStatus.Searching, detail!.Status);
+        Assert.Equal("Facility A", detail.FacilityName);
+        Assert.Equal(2, timeline.Count);
+        Assert.Equal(BloodNeedStatus.PendingReview, timeline[0].ToStatus);
+        Assert.Equal(BloodNeedStatus.Searching, timeline[1].ToStatus);
+        Assert.All(timeline, item => Assert.False(string.IsNullOrWhiteSpace(item.ActorDisplayName)));
+        Assert.Equal(BloodNeedStatus.Searching, (await adminService.GetAsync(need.Id))!.Status);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            new BloodNeedService(dbContext, StaffUser("staff-other", WorkflowTestSupport.FacilityAId)).GetAsync(need.Id));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            new BloodNeedService(dbContext, AdminUser("admin-b", WorkflowTestSupport.FacilityBId)).GetAsync(need.Id));
+        Assert.Null(await creatorService.GetAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
     public async Task FacilityAdminActions_CannotTargetAnotherFacilityNeed()
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
@@ -172,11 +210,105 @@ public sealed class BloodNeedServiceTests
     {
         await using var dbContext = WorkflowTestSupport.CreateDbContext();
         var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", status);
+        dbContext.BloodInventory.Add(new BloodLink.Domain.Entities.BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = WorkflowTestSupport.FacilityAId,
+            BloodType = need.BloodType,
+            TotalUnits = need.UnitsNeeded + 2,
+            ReservedUnits = 2,
+            LowStockThreshold = 1,
+            UpdatedAtUtc = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
         var service = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
 
         await service.FulfilInternallyAsync(new NeedDecisionRequest(need.Id, "Covered by local stock"));
 
         Assert.Equal(BloodNeedStatus.FulfilledInternally, dbContext.BloodNeeds.Single().Status);
+        Assert.Equal(2, dbContext.BloodInventory.Single().TotalUnits);
+        Assert.Equal(2, dbContext.BloodInventory.Single().ReservedUnits);
+        Assert.Equal(1, dbContext.InventoryTransactions.Count());
+        Assert.Single(dbContext.BloodNeedStatusHistory.Where(item => item.ToStatus == BloodNeedStatus.FulfilledInternally));
+        Assert.Contains(dbContext.AuditLogs, item => item.EntityId == need.Id && item.Action == "BloodNeedStatusChanged");
+        Assert.Contains(dbContext.Notifications, item => item.RecipientUserId == "staff-a" && item.RelatedEntityId == need.Id);
+    }
+
+    [Fact]
+    public async Task FulfilInternallyAsync_InsufficientAvailableStockChangesNothing()
+    {
+        await using var dbContext = WorkflowTestSupport.CreateDbContext();
+        var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", units: 4);
+        dbContext.BloodInventory.Add(new BloodLink.Domain.Entities.BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = WorkflowTestSupport.FacilityAId,
+            BloodType = need.BloodType,
+            TotalUnits = 4,
+            ReservedUnits = 3,
+            LowStockThreshold = 0,
+            UpdatedAtUtc = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+        var service = new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId));
+
+        await Assert.ThrowsAsync<BloodLink.Domain.Exceptions.InsufficientInventoryException>(() =>
+            service.FulfilInternallyAsync(new NeedDecisionRequest(need.Id, null)));
+
+        Assert.Equal(BloodNeedStatus.PendingReview, need.Status);
+        Assert.Equal(4, dbContext.BloodInventory.Single().TotalUnits);
+        Assert.Equal(3, dbContext.BloodInventory.Single().ReservedUnits);
+        Assert.Empty(dbContext.InventoryTransactions);
+        Assert.Empty(dbContext.AuditLogs);
+        Assert.Empty(dbContext.Notifications);
+    }
+
+    [Fact]
+    public async Task FulfilInternallyAsync_SaveFailureLeavesEveryRecordUnchanged()
+    {
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var interceptor = new FailingSaveInterceptor();
+        var options = new DbContextOptionsBuilder<BloodLink.Infrastructure.Data.BloodLinkDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString(), databaseRoot)
+            .AddInterceptors(interceptor)
+            .Options;
+        Guid needId;
+        Guid inventoryId;
+        await using (var dbContext = WorkflowTestSupport.CreateDbContext(options))
+        {
+            WorkflowTestSupport.AddUser(dbContext, "staff-a", RoleNames.FacilityStaff, WorkflowTestSupport.FacilityAId);
+            WorkflowTestSupport.AddUser(dbContext, "admin-a", RoleNames.FacilityAdmin, WorkflowTestSupport.FacilityAId);
+            var need = WorkflowTestSupport.AddNeed(dbContext, WorkflowTestSupport.FacilityAId, "staff-a", units: 2);
+            needId = need.Id;
+            var inventory = new BloodLink.Domain.Entities.BloodInventory
+            {
+                Id = Guid.NewGuid(),
+                FacilityId = WorkflowTestSupport.FacilityAId,
+                BloodType = need.BloodType,
+                TotalUnits = 5,
+                ReservedUnits = 1,
+                LowStockThreshold = 0,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            inventoryId = inventory.Id;
+            dbContext.BloodInventory.Add(inventory);
+            await dbContext.SaveChangesAsync();
+            interceptor.Fail = true;
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                new BloodNeedService(dbContext, AdminUser("admin-a", WorkflowTestSupport.FacilityAId))
+                    .FulfilInternallyAsync(new NeedDecisionRequest(need.Id, null)));
+        }
+
+        interceptor.Fail = false;
+        await using var verification = new BloodLink.Infrastructure.Data.BloodLinkDbContext(options);
+        Assert.Equal(BloodNeedStatus.PendingReview, (await verification.BloodNeeds.SingleAsync(item => item.Id == needId)).Status);
+        var storedInventory = await verification.BloodInventory.SingleAsync(item => item.Id == inventoryId);
+        Assert.Equal(5, storedInventory.TotalUnits);
+        Assert.Equal(1, storedInventory.ReservedUnits);
+        Assert.Empty(verification.InventoryTransactions);
+        Assert.Empty(verification.BloodNeedStatusHistory);
+        Assert.Empty(verification.AuditLogs);
+        Assert.Empty(verification.Notifications);
     }
 
     [Fact]
@@ -270,5 +402,18 @@ public sealed class BloodNeedServiceTests
         var user = new FakeCurrentUserService { UserId = userId, FacilityId = facilityId };
         user.RoleList.Add(RoleNames.FacilityAdmin);
         return user;
+    }
+
+    private sealed class FailingSaveInterceptor : SaveChangesInterceptor
+    {
+        public bool Fail { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default) =>
+            Fail
+                ? ValueTask.FromException<InterceptionResult<int>>(new InvalidOperationException("Injected save failure."))
+                : ValueTask.FromResult(result);
     }
 }

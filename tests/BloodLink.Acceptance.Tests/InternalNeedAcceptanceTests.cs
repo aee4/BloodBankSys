@@ -1,6 +1,7 @@
 using BloodLink.Acceptance.Tests.Support;
 using BloodLink.Application.Contracts;
 using BloodLink.Application.DTOs;
+using BloodLink.Domain.Entities;
 using BloodLink.Domain.Enums;
 using BloodLink.Infrastructure.Services.Needs;
 
@@ -62,11 +63,29 @@ public sealed class InternalNeedAcceptanceTests
         var need = await needServiceAsStaff.CreateAsync(new CreateBloodNeedRequest(
             BloodType.BPositive, 1, UrgencyLevel.Routine, DateTime.UtcNow.AddDays(2), null));
 
+        dbContext.BloodInventory.Add(new BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = WorkflowTestSupport.FacilityAId,
+            BloodType = BloodType.BPositive,
+            TotalUnits = 5,
+            ReservedUnits = 2,
+            LowStockThreshold = 1,
+            UpdatedAtUtc = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
         var needServiceAsAdmin = new BloodNeedService(dbContext, adminUser);
         await needServiceAsAdmin.FulfilInternallyAsync(new NeedDecisionRequest(need.Id, "Covered from own stock"));
 
         var updated = (await needServiceAsAdmin.ListOwnFacilityAsync()).Single(item => item.Id == need.Id);
         Assert.Equal(BloodNeedStatus.FulfilledInternally, updated.Status);
+        var inventory = Assert.Single(dbContext.BloodInventory);
+        Assert.Equal(4, inventory.TotalUnits);
+        Assert.Equal(2, inventory.ReservedUnits);
+        var transaction = Assert.Single(dbContext.InventoryTransactions);
+        Assert.Equal(-1, transaction.TotalUnitsChange);
+        Assert.Equal(5, transaction.TotalBefore);
+        Assert.Equal(4, transaction.TotalAfter);
     }
 
     [Fact]

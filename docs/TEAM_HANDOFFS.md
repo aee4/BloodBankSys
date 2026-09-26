@@ -1,5 +1,9 @@
 # Team Handoffs
 
+## Phase 5C-A backend prerequisite
+
+The request-workflow contract prerequisite is implemented on `feature/request-workflow-contracts` from approved main `b2107fc3da4f9b0a242bf7a62b4e9b2175ec1ad8`. It adds authorized need/request reads and persisted timelines, atomic local consumption and transition evidence, availability recheck at external-request submission, safe notification references, role-scoped dashboard snapshots, and additive persistence changes. The relational proof harness is opt-in and uses disposable SQL Server LocalDB databases. Phase 5C Razor routes/pages/navigation were not started; the UI team can resume `feature/request-dashboard-ui-completion` after this contract branch is reviewed and integrated. See [API contracts](API_CONTRACTS.md), [database guide](DATABASE_GUIDE.md), and [workflow definitions](WORKFLOWS.md).
+
 ## Project Manager / Team Lead - Emmanuel Eyram Korku Agbetor
 
 - Mission: own scope, contracts, workflow truth, integration order, and final acceptance.

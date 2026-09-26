@@ -49,6 +49,10 @@ The existing synchronous interface has no separate operational-access property. 
 
 This immediately protects service methods that use these guards. It cannot authorize a method that never checks the current-user abstraction; see cross-team findings below.
 
+## Request workflow service authorization
+
+Need detail is limited to the creating staff member or an active FacilityAdmin at the same approved facility. Need history uses persisted `BloodNeedStatusHistory` and applies the same scope. Request detail and history are limited to active FacilityAdmins at either participating approved facility. Internal fulfilment and external request creation revalidate facility scope in the service; external fulfilment and reservation release also validate the acting participating facility. Notification list/read is recipient-only, and a related-record reference is returned only after record-level access succeeds. These checks apply to direct service calls, not only UI routes.
+
 ## Login, logout and account pages
 
 - GET `/account/login` renders the existing public login design with a standard HTTP form. POST on the same path uses `SignInManager.PasswordSignInAsync`, with `lockoutOnFailure: true`.

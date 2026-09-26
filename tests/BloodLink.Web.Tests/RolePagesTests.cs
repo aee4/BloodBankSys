@@ -73,11 +73,19 @@ public sealed class RolePagesTests
         var user = await app.SeedAsync(RoleNames.FacilityAdmin);
         await using (var db = await DbAsync(app))
         {
+            var requestingFacilityId = Guid.NewGuid();
+            db.Facilities.Add(new Facility
+            {
+                Id = requestingFacilityId,
+                Name = "Requesting Facility",
+                RegistrationNumber = Guid.NewGuid().ToString("N"),
+                Status = FacilityStatus.Approved
+            });
             var needId = Guid.NewGuid();
             db.BloodNeeds.Add(new BloodNeed
             {
                 Id = needId,
-                FacilityId = Guid.NewGuid(),
+                FacilityId = requestingFacilityId,
                 RequestedByUserId = user.Id,
                 BloodType = BloodType.ONegative,
                 UnitsNeeded = 4,
@@ -91,7 +99,7 @@ public sealed class RolePagesTests
             {
                 Id = Guid.NewGuid(),
                 BloodNeedId = needId,
-                RequestingFacilityId = Guid.NewGuid(),
+                RequestingFacilityId = requestingFacilityId,
                 SourceFacilityId = user.FacilityId!.Value,
                 BloodType = BloodType.ONegative,
                 UnitsRequested = 4,

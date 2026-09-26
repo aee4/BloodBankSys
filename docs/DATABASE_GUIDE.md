@@ -9,6 +9,8 @@ BloodLink uses SQL Server, EF Core migrations, and ASP.NET Core Identity. The ca
 - Inventory counts cannot be negative, and reserved units cannot exceed total units.
 - Requests require positive requested units; accepted units, when supplied, are positive and no greater than requested units.
 - A request's source and requesting facilities must differ.
+- At most one request in `Sent` or `Accepted` state may exist for a need.
+- Inventory transaction rows preserve both before and after total/reserved balances.
 - Facility name, facility registration number, `(FacilityId, BloodType)` inventory, and `FacilityStaff.UserId` are unique.
 - Enum values are stored as integers to preserve the established schema contract.
 
@@ -24,6 +26,8 @@ dotnet ef migrations has-pending-model-changes --project src/BloodLink.Infrastru
 ```
 
 `20260921230224_EnforceCanonicalDatabaseIntegrity` is additive: it adds bounds, indexes, foreign keys, and checks without deleting data. It deliberately fails before changing the schema if existing rows violate key invariants or new uniqueness rules. Correct the reported data through an approved operational process and rerun; never modify the migration to discard records.
+
+`20260926144518_AddRequestWorkflowContracts` adds `BloodNeedStatusHistory`, before-balance columns on `InventoryTransactions`, and a filtered unique index for active requests per need. It fails fast if legacy duplicate active requests exist, and backfills before-balances as `after - change` before adding integrity checks. It is additive and has a down migration. Relational workflow tests apply the full chain to disposable SQL Server LocalDB databases; see `tests/BloodLink.Relational.Tests`.
 
 Apply migrations as an explicit deployment step. Application startup does not call `Migrate` or `EnsureCreated`.
 

@@ -2,6 +2,7 @@ using BloodLink.Acceptance.Tests.Support;
 using BloodLink.Application.Contracts;
 using BloodLink.Application.DTOs;
 using BloodLink.Domain.Enums;
+using BloodLink.Domain.Entities;
 using BloodLink.Infrastructure.Services.Dashboard;
 using BloodLink.Infrastructure.Services.Needs;
 using BloodLink.Infrastructure.Services.Requests;
@@ -24,6 +25,17 @@ public sealed class DashboardsAcceptanceTests
 
         var needService = new BloodNeedService(dbContext, staffUser);
         var needServiceAsAdmin = new BloodNeedService(dbContext, adminAUser);
+        dbContext.BloodInventory.Add(new BloodInventory
+        {
+            Id = Guid.NewGuid(),
+            FacilityId = WorkflowTestSupport.FacilityAId,
+            BloodType = BloodType.APositive,
+            TotalUnits = 2,
+            ReservedUnits = 0,
+            LowStockThreshold = 1,
+            UpdatedAtUtc = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
 
         // One need left open (PendingReview), one need fulfilled internally, and one rejected.
         var openNeed = await needService.CreateAsync(new CreateBloodNeedRequest(

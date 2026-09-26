@@ -8,6 +8,7 @@ public interface IBloodRequestService
     Task<IReadOnlyList<BloodRequestDto>> ListSentAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BloodRequestDto>> ListReceivedAsync(CancellationToken cancellationToken = default);
     Task<BloodRequestDto?> GetAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RequestTimelineItemDto>> GetTimelineAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);
     Task AcceptAsync(RequestResponseRequest request, CancellationToken cancellationToken = default);
     Task RejectAsync(RequestResponseRequest request, CancellationToken cancellationToken = default);
     Task CancelAsync(Guid bloodRequestId, CancellationToken cancellationToken = default);

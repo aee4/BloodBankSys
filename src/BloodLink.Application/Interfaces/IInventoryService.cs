@@ -57,6 +57,8 @@ public interface IInventoryService
     /// </summary>
     Task ReserveForRequestAsync(Guid bloodRequestId, int unitsToReserve, bool deferSave = false, CancellationToken cancellationToken = default);
 
+    Task ConsumeForNeedAsync(Guid bloodNeedId, BloodType bloodType, int unitsToConsume, string reason, bool deferSave = false, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Releases a previous reservation if request is cancelled before fulfilment.
     /// Atomically decreases ReservedUnits and creates a Release transaction.

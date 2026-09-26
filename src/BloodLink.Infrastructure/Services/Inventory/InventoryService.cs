@@ -96,6 +96,8 @@ public sealed class InventoryService : IInventoryService
             throw new InsufficientInventoryException($"Inventory adjustment would reduce total units below reserved units. Total: {inventory.TotalUnits}, Reserved: {inventory.ReservedUnits}, Change: {request.TotalUnitsChange}");
         }
 
+        var totalBefore = inventory.TotalUnits;
+        var reservedBefore = inventory.ReservedUnits;
         inventory.TotalUnits = newTotal;
         inventory.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -113,6 +115,8 @@ public sealed class InventoryService : IInventoryService
             TransactionType = transactionType,
             TotalUnitsChange = request.TotalUnitsChange,
             ReservedUnitsChange = 0,
+            TotalBefore = totalBefore,
+            ReservedBefore = reservedBefore,
             TotalAfter = inventory.TotalUnits,
             ReservedAfter = inventory.ReservedUnits,
             Reason = request.Reason,
@@ -153,6 +157,8 @@ public sealed class InventoryService : IInventoryService
                     transaction.TransactionType,
                     transaction.TotalUnitsChange,
                     transaction.ReservedUnitsChange,
+                    transaction.TotalBefore,
+                    transaction.ReservedBefore,
                     transaction.TotalAfter,
                     transaction.ReservedAfter,
                     transaction.Reason,
@@ -261,6 +267,8 @@ public sealed class InventoryService : IInventoryService
         }
 
         // Atomically reserve units
+        var totalBefore = sourceInventory.TotalUnits;
+        var reservedBefore = sourceInventory.ReservedUnits;
         sourceInventory.ReservedUnits += unitsToReserve;
         sourceInventory.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -272,6 +280,8 @@ public sealed class InventoryService : IInventoryService
             TransactionType = InventoryTransactionType.Reserve,
             TotalUnitsChange = 0,
             ReservedUnitsChange = unitsToReserve,
+            TotalBefore = totalBefore,
+            ReservedBefore = reservedBefore,
             TotalAfter = sourceInventory.TotalUnits,
             ReservedAfter = sourceInventory.ReservedUnits,
             Reason = $"Reservation for blood request {bloodRequestId} from {request.RequestingFacilityId}",
@@ -289,12 +299,93 @@ public sealed class InventoryService : IInventoryService
         }
     }
 
+    public async Task ConsumeForNeedAsync(
+        Guid bloodNeedId,
+        BloodType bloodType,
+        int unitsToConsume,
+        string reason,
+        bool deferSave = false,
+        CancellationToken cancellationToken = default)
+    {
+        var facilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
+        if (bloodNeedId == Guid.Empty || unitsToConsume <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(unitsToConsume), "Need and consumed units must be valid and positive.");
+        }
+
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 500)
+        {
+            throw new ArgumentException("A valid inventory consumption reason is required.", nameof(reason));
+        }
+
+        var need = await _context.BloodNeeds.SingleOrDefaultAsync(item => item.Id == bloodNeedId, cancellationToken)
+            ?? throw new EntityNotFoundException("The blood need was not found.");
+        if (need.FacilityId != facilityId)
+        {
+            throw new Domain.Exceptions.UnauthorizedAccessException("The need belongs to another facility.");
+        }
+        if (need.Status is not (BloodNeedStatus.PendingReview or BloodNeedStatus.Searching)
+            || need.BloodType != bloodType || unitsToConsume > need.UnitsNeeded)
+        {
+            throw new BusinessRuleViolationException("Inventory consumption does not match an eligible local blood need.");
+        }
+        if (need.Status == BloodNeedStatus.Searching && await _context.BloodRequests.AnyAsync(
+                request => request.BloodNeedId == need.Id
+                    && (request.Status == BloodRequestStatus.Sent || request.Status == BloodRequestStatus.Accepted),
+                cancellationToken))
+        {
+            throw new BusinessRuleViolationException("Resolve the active external request before consuming inventory for this need.");
+        }
+
+        var inventory = await _context.BloodInventory.SingleOrDefaultAsync(
+            item => item.FacilityId == facilityId && item.BloodType == bloodType,
+            cancellationToken) ?? throw new EntityNotFoundException("Matching facility inventory was not found.");
+
+        if (inventory.AvailableUnits < unitsToConsume)
+        {
+            throw new InsufficientInventoryException("Available inventory is insufficient to fulfil this need.");
+        }
+
+        var totalBefore = inventory.TotalUnits;
+        var reservedBefore = inventory.ReservedUnits;
+        inventory.TotalUnits -= unitsToConsume;
+        inventory.UpdatedAtUtc = DateTime.UtcNow;
+        _context.InventoryTransactions.Add(new InventoryTransaction
+        {
+            Id = Guid.NewGuid(),
+            BloodInventoryId = inventory.Id,
+            TransactionType = InventoryTransactionType.Consumption,
+            TotalUnitsChange = -unitsToConsume,
+            ReservedUnitsChange = 0,
+            TotalBefore = totalBefore,
+            ReservedBefore = reservedBefore,
+            TotalAfter = inventory.TotalUnits,
+            ReservedAfter = inventory.ReservedUnits,
+            Reason = reason.Trim(),
+            ReferenceType = nameof(BloodNeed),
+            ReferenceId = bloodNeedId,
+            PerformedByUserId = _currentUserService.UserId!,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        if (!deferSave)
+        {
+            await SaveInventoryMutationAsync("Need fulfilment inventory changed concurrently. Reload and retry.", cancellationToken);
+        }
+    }
+
     public async Task ReleaseReservationAsync(Guid bloodRequestId, bool deferSave = false, CancellationToken cancellationToken = default)
     {
         // Get the blood request
         var request = await _context.BloodRequests
             .FirstOrDefaultAsync(br => br.Id == bloodRequestId, cancellationToken)
             ?? throw new EntityNotFoundException($"Blood request with ID {bloodRequestId} not found.");
+
+        var actingFacilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
+        if (actingFacilityId != request.RequestingFacilityId && actingFacilityId != request.SourceFacilityId)
+        {
+            throw new Domain.Exceptions.UnauthorizedAccessException("Only an administrator at a participating facility may release this request reservation.");
+        }
 
         // Verify request has been accepted (has reserved units)
         if (request.Status != BloodRequestStatus.Accepted || !request.UnitsAccepted.HasValue)
@@ -314,6 +405,8 @@ public sealed class InventoryService : IInventoryService
         }
 
         // Atomically release reservation
+        var totalBefore = sourceInventory.TotalUnits;
+        var reservedBefore = sourceInventory.ReservedUnits;
         sourceInventory.ReservedUnits -= request.UnitsAccepted.Value;
         sourceInventory.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -325,6 +418,8 @@ public sealed class InventoryService : IInventoryService
             TransactionType = InventoryTransactionType.Release,
             TotalUnitsChange = 0,
             ReservedUnitsChange = -request.UnitsAccepted.Value,
+            TotalBefore = totalBefore,
+            ReservedBefore = reservedBefore,
             TotalAfter = sourceInventory.TotalUnits,
             ReservedAfter = sourceInventory.ReservedUnits,
             Reason = $"Release of reservation for cancelled blood request {bloodRequestId}",
@@ -348,6 +443,12 @@ public sealed class InventoryService : IInventoryService
         var request = await _context.BloodRequests
             .FirstOrDefaultAsync(br => br.Id == bloodRequestId, cancellationToken)
             ?? throw new EntityNotFoundException($"Blood request with ID {bloodRequestId} not found.");
+
+        var actingFacilityId = await ValidateFacilityAdminAuthorizationAsync(cancellationToken);
+        if (actingFacilityId != request.SourceFacilityId)
+        {
+            throw new Domain.Exceptions.UnauthorizedAccessException("Only the source facility admin may fulfil this request.");
+        }
 
         // Verify status is Accepted
         if (request.Status != BloodRequestStatus.Accepted || !request.UnitsAccepted.HasValue)
@@ -387,6 +488,11 @@ public sealed class InventoryService : IInventoryService
 
         var unitsToTransfer = request.UnitsAccepted.Value;
 
+        var sourceTotalBefore = sourceInventory.TotalUnits;
+        var sourceReservedBefore = sourceInventory.ReservedUnits;
+        var requestingTotalBefore = requestingInventory.TotalUnits;
+        var requestingReservedBefore = requestingInventory.ReservedUnits;
+
         // Atomically transfer: decrease source TotalUnits and ReservedUnits, increase requesting TotalUnits
         sourceInventory.TotalUnits -= unitsToTransfer;
         sourceInventory.ReservedUnits -= unitsToTransfer;
@@ -403,6 +509,8 @@ public sealed class InventoryService : IInventoryService
             TransactionType = InventoryTransactionType.TransferOut,
             TotalUnitsChange = -unitsToTransfer,
             ReservedUnitsChange = -unitsToTransfer,
+            TotalBefore = sourceTotalBefore,
+            ReservedBefore = sourceReservedBefore,
             TotalAfter = sourceInventory.TotalUnits,
             ReservedAfter = sourceInventory.ReservedUnits,
             Reason = $"Transfer fulfillment for blood request {bloodRequestId} to facility {request.RequestingFacilityId}",
@@ -420,6 +528,8 @@ public sealed class InventoryService : IInventoryService
             TransactionType = InventoryTransactionType.TransferIn,
             TotalUnitsChange = unitsToTransfer,
             ReservedUnitsChange = 0,
+            TotalBefore = requestingTotalBefore,
+            ReservedBefore = requestingReservedBefore,
             TotalAfter = requestingInventory.TotalUnits,
             ReservedAfter = requestingInventory.ReservedUnits,
             Reason = $"Transfer received for blood request {bloodRequestId} from facility {request.SourceFacilityId}",

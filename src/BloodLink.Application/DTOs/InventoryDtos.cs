@@ -34,6 +34,8 @@ public sealed record InventoryTransactionDto(
     InventoryTransactionType TransactionType,
     int TotalUnitsChange,
     int ReservedUnitsChange,
+    int TotalBefore,
+    int ReservedBefore,
     int TotalAfter,
     int ReservedAfter,
     string Reason,

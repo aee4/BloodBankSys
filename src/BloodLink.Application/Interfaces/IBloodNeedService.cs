@@ -5,6 +5,8 @@ namespace BloodLink.Application.Interfaces;
 public interface IBloodNeedService
 {
     Task<BloodNeedDto> CreateAsync(CreateBloodNeedRequest request, CancellationToken cancellationToken = default);
+    Task<BloodNeedDetailDto?> GetAsync(Guid bloodNeedId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<BloodNeedTimelineItemDto>> GetTimelineAsync(Guid bloodNeedId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BloodNeedDto>> GetMineAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<BloodNeedDto>> ListOwnFacilityAsync(CancellationToken cancellationToken = default);
     Task StartSearchAsync(NeedDecisionRequest request, CancellationToken cancellationToken = default);

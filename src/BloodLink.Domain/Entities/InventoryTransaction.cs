@@ -9,6 +9,8 @@ public sealed class InventoryTransaction : Entity
     public InventoryTransactionType TransactionType { get; set; }
     public int TotalUnitsChange { get; set; }
     public int ReservedUnitsChange { get; set; }
+    public int TotalBefore { get; set; }
+    public int ReservedBefore { get; set; }
     public int TotalAfter { get; set; }
     public int ReservedAfter { get; set; }
     public string Reason { get; set; } = string.Empty;

@@ -1,5 +1,9 @@
 # BloodLink QA Release Acceptance Checklist
 
+## Phase 5C-A scope note
+
+The existing acceptance rows below describe the original release baseline. The separate Phase 5C-A backend prerequisite adds service-contract and opt-in relational verification; it does not complete the Phase 5C UI. Before UI integration, review the linked contract and migration changes, run the default solution gates, and run `tests/BloodLink.Relational.Tests` against disposable SQL Server LocalDB.
+
 **Document Version:** 1.0.0  
 **Date:** 16 August 2026  
 **Author:** Jennifer Banibensu, DevOps & QA/Test Engineer (Student ID: 22013023)  

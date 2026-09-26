@@ -741,6 +741,8 @@ public class InventoryServiceTests : IDisposable
     {
         // Arrange
         SeedApprovedFacility(_sourceFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_requestingFacilityId);
+        SeedApprovedFacility(_requestingFacilityId);
 
         var inventory = new BloodInventory
         {
@@ -799,6 +801,7 @@ public class InventoryServiceTests : IDisposable
         // Arrange
         SeedApprovedFacility(_sourceFacilityId);
         SeedApprovedFacility(_requestingFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_sourceFacilityId);
 
         var sourceInventory = new BloodInventory
         {
@@ -871,6 +874,7 @@ public class InventoryServiceTests : IDisposable
         // Arrange
         SeedApprovedFacility(_sourceFacilityId);
         SeedApprovedFacility(_requestingFacilityId);
+        _mockCurrentUserService.Setup(s => s.FacilityId).Returns(_sourceFacilityId);
 
         var sourceInventory = new BloodInventory
         {
